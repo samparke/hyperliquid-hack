@@ -1,3 +1,6 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/Openzeppelin/openzeppelin-contracts
+[submodule "lib/hyper-evm-lib"]
+	path = lib/hyper-evm-lib
+	url = https://github.com/hyperliquid-dev/hyper-evm-lib

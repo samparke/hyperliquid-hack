@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import {Math} from "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
-import {IERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {Constants} from "./utils/Constants.sol";
 import {ReentrancyGuard} from "./utils/ReentrancyGuard.sol";
@@ -291,7 +291,7 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
      *  CONSTRUCTOR
      ***********************************************/
 
-    constructor(SovereignPoolConstructorArgs memory args, uint32 _spotIndex) {
+    constructor(SovereignPoolConstructorArgs memory args) {
         // index will be 0 for PURR/USDC pool
         if (args.token0 == args.token1) {
             revert SovereignPool__sameTokenNotAllowed();
@@ -332,7 +332,6 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
 
         // Initialize timestamp at which Swap Fee Module can be set
         swapFeeModuleUpdateTimestamp = block.timestamp;
-        spotIndex = 0;
     }
 
     /************************************************

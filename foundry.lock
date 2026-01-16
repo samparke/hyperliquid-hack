@@ -1,4 +1,7 @@
 {
+  "lib/hyper-evm-lib": {
+    "rev": "f1023c72d8087f68186ee65a2ac25a929b464a17"
+  },
   "lib/openzeppelin-contracts": {
     "tag": {
       "name": "v5.5.0",

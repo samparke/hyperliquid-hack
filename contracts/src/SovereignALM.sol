@@ -3,57 +3,111 @@ pragma solidity 0.8.30;
 
 import {ISovereignALM} from "./ALM/interfaces/ISovereignALM.sol";
 import {ALMLiquidityQuoteInput, ALMLiquidityQuote} from "./ALM/structs/SovereignALMStructs.sol";
-import {PrecompileReader} from "./library/PrecompileReader.sol";
 import {ISovereignPool} from "./SovereignPool.sol";
+import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 
-contract SovereignAlM is ISovereignALM {
+/// @title SovereignALM - Hyperliquid Spot Price Oracle ALM
+/// @notice ALM that uses Hyperliquid's spot price precompile for token/USDC swaps
+/// @dev Reads spot prices directly from Hyperliquid L1 using hyper-evm-lib
+contract SovereignALM is ISovereignALM {
+    /// @notice Hyperliquid spot price precision (8 decimals)
+    uint256 private constant PRICE_DECIMALS = 8;
+
+    /// @notice USDC decimals
+    uint256 private constant USDC_DECIMALS = 6;
+
+    /// @notice The sovereign pool this ALM serves
+    ISovereignPool public immutable pool;
+
+    /// @notice Token0 address (the non-USDC token)
+    address public immutable token0;
+
+    error SovereignALM__OnlyPool();
+    error SovereignALM__ZeroPrice();
+
+    constructor(address _pool) {
+        pool = ISovereignPool(_pool);
+        token0 = pool.token0();
+    }
+
+    modifier onlyPool() {
+        if (msg.sender != address(pool)) revert SovereignALM__OnlyPool();
+        _;
+    }
+
+    /// @notice Get the current spot price from Hyperliquid for token0/USDC
+    /// @return spotPrice The spot price with 8 decimal precision
+    function getSpotPrice() public view returns (uint64 spotPrice) {
+        // Uses PrecompileLib to read spot price directly by token address
+        spotPrice = PrecompileLib.spotPx(token0);
+    }
+
+    /// @notice Get token0 info from Hyperliquid
+    /// @return info Token information including decimals
+    function getToken0Info() public view returns (PrecompileLib.TokenInfo memory info) {
+        info = PrecompileLib.tokenInfo(token0);
+    }
+
+    /// @notice Calculate the output amount for a swap using Hyperliquid spot price
     function getLiquidityQuote(
         ALMLiquidityQuoteInput memory _almLiquidityQuoteInput,
-        bytes calldata _externalContext,
-        bytes calldata _verifierData
-    ) external override returns (ALMLiquidityQuote memory) {
-        // index will be 0 for PURR/USDC pool
-        uint64 spotPrice = PrecompileReader.getSpotPrice(ISovereignPool(msg.sender).spotIndex());
+        bytes calldata,
+        bytes calldata
+    ) external view override returns (ALMLiquidityQuote memory) {
+        // Get token0 info from precompile
+        PrecompileLib.TokenInfo memory tokenInfo = getToken0Info();
 
-        uint256 amountOut =
-            _calculateSwapOut(_almLiquidityQuoteInput.amountInMinusFee, spotPrice, _almLiquidityQuoteInput.isZeroToOne);
+        // Get normalized spot price (accounts for szDecimals)
+        // Raw spotPx needs to be multiplied by 10^szDecimals to get actual price
+        uint64 rawSpotPrice = getSpotPrice();
+        if (rawSpotPrice == 0) revert SovereignALM__ZeroPrice();
+
+        // Normalize price: multiply by 10^szDecimals to get price with 8 decimal precision
+        uint256 normalizedPrice = uint256(rawSpotPrice) * (10 ** tokenInfo.szDecimals);
+
+        uint256 amountOut = _calculateSwapOut(
+            _almLiquidityQuoteInput.amountInMinusFee,
+            normalizedPrice,
+            tokenInfo.weiDecimals,
+            _almLiquidityQuoteInput.isZeroToOne
+        );
+
         return ALMLiquidityQuote({
-            isCallbackOnSwap: false, amountOut: amountOut, amountInFilled: _almLiquidityQuoteInput.amountInMinusFee
+            isCallbackOnSwap: false,
+            amountOut: amountOut,
+            amountInFilled: _almLiquidityQuoteInput.amountInMinusFee
         });
     }
 
-    function onDepositLiquidityCallback(uint256 _amount0, uint256 _amount1, bytes memory _data) external override {}
+    /// @notice Callback after liquidity deposit
+    function onDepositLiquidityCallback(uint256, uint256, bytes memory) external override onlyPool {}
 
-    function onSwapCallback(bool _isZeroToOne, uint256 _amountIn, uint256 _amountOut) external override {}
+    /// @notice Callback after swap execution
+    function onSwapCallback(bool, uint256, uint256) external override onlyPool {}
 
-    function _calculateSwapOut(uint256 amountIn, uint64 spotPrice, bool isZeroToOne) internal pure returns (uint256) {
+    /// @notice Calculate output amount based on normalized spot price and swap direction
+    /// @dev normalizedPrice is the price of token0 in USDC with 8 decimal precision
+    /// @param amountIn Input amount in respective token decimals
+    /// @param normalizedPrice Normalized spot price (raw price * 10^szDecimals)
+    /// @param token0Decimals weiDecimals of token0
+    /// @param isZeroToOne True if swapping token0 -> USDC
+    function _calculateSwapOut(
+        uint256 amountIn,
+        uint256 normalizedPrice,
+        uint8 token0Decimals,
+        bool isZeroToOne
+    ) internal pure returns (uint256 amountOut) {
+        // Scaling factor: 10^(token0Decimals + priceDecimals - usdcDecimals)
+        uint256 scaleFactor = 10 ** (token0Decimals + PRICE_DECIMALS - USDC_DECIMALS);
+
         if (isZeroToOne) {
-            // PURR (18) -> USDC (6)
-
-            //              (1e18 * 471810000 * 1e6) / (1e18 * 1e8)
-            // Type: uint256
-            // ├ Hex: 0x47fe14
-            // ├ Hex (full word): 0x000000000000000000000000000000000000000000000000000000000047fe14
-            // └ Decimal: 4718100 -> correct usdc amount (6 decimals)
-            // 1e18 is 1 PURR. 1 PURR = 471810000 spot price (8 decimals)
-            // therefore to convert to 6 decimals, we take off two 0s
-
-            return (amountIn * spotPrice * 1e6) / (1e18 * 1e8);
+            // Token0 -> USDC
+            // amountOut (6 decimals) = amountIn (token0 decimals) * price (8 decimals) / scaleFactor
+            amountOut = (amountIn * normalizedPrice) / scaleFactor;
         } else {
-            // USDC (6) -> PURR (18)
-
-            // ➜ uint256 result3 = (amountIn1 * 1e18 * 1e8) / (1e6 * 471810000)
-            // ➜ result3
-            // Type: uint256
-            // ├ Hex: 0x2f0ff27042a5b24
-            // ├ Hex (full word): 0x00000000000000000000000000000000000000000000000002f0ff27042a5b24
-            // └ Decimal: 211949725525105444
-
-            // 211949725525105444 / 10**18 =
-            // 0.211949725525105444 PURR
-            // reciprocal: 1 / 0.21195 ≈ 4.717 USDC per PURR
-
-            return (amountIn * 1e18 * 1e8) / (1e6 * spotPrice);
+            // USDC -> Token0
+            // amountOut (token0 decimals) = amountIn (6 decimals) * scaleFactor / price (8 decimals)
+            amountOut = (amountIn * scaleFactor) / normalizedPrice;
         }
     }
 }
