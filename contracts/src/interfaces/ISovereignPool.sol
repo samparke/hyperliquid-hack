@@ -63,6 +63,8 @@ interface ISovereignPool is IValantisPool {
 
     function swap(SovereignPoolSwapParams calldata _swapParams) external returns (uint256, uint256);
 
+    function spotIndex() external view returns (uint32);
+
     function depositLiquidity(
         uint256 _amount0,
         uint256 _amount1,

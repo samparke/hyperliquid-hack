@@ -261,6 +261,8 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
      */
     ISwapFeeModule private _swapFeeModule;
 
+    uint32 public spotIndex;
+
     /************************************************
      *  MODIFIERS
      ***********************************************/
@@ -289,7 +291,8 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
      *  CONSTRUCTOR
      ***********************************************/
 
-    constructor(SovereignPoolConstructorArgs memory args) {
+    constructor(SovereignPoolConstructorArgs memory args, uint32 _spotIndex) {
+        // index will be 0 for PURR/USDC pool
         if (args.token0 == args.token1) {
             revert SovereignPool__sameTokenNotAllowed();
         }
@@ -329,6 +332,7 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
 
         // Initialize timestamp at which Swap Fee Module can be set
         swapFeeModuleUpdateTimestamp = block.timestamp;
+        spotIndex = 0;
     }
 
     /************************************************
