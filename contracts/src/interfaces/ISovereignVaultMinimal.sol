@@ -39,4 +39,14 @@ interface ISovereignVaultMinimal {
      *     @param _feePoolManager1 Amount of token1 due to `poolManager`.
      */
     function claimPoolManagerFees(uint256 _feePoolManager0, uint256 _feePoolManager1) external;
+
+    /**
+     *     @notice Sends tokens from the vault to a recipient.
+     *     @dev Only callable by an authorized Sovereign Pool.
+     *     @dev Used during swaps to transfer output tokens to the recipient.
+     *     @param _token Address of the token to send.
+     *     @param _recipient Address to receive the tokens.
+     *     @param _amount Amount of tokens to send.
+     */
+    function sendTokensToRecipient(address _token, address _recipient, uint256 _amount) external;
 }

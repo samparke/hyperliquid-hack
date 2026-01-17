@@ -1059,7 +1059,7 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
         } else {
             // If `sovereignVault` is not this pool,
             // ALM must have already approved this pool to send `amountOut` to `recipient`
-            swapTokenOut.safeTransferFrom(sovereignVault, recipient, amountOut);
+            ISovereignVaultMinimal(sovereignVault).sendTokensToRecipient(address(swapTokenOut), recipient, amountOut);
         }
     }
 
