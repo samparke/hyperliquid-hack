@@ -4,27 +4,26 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 export default function Header() {
   return (
-    <header className="sticky top-0 z-50 bg-zinc-50/80 backdrop-blur-sm border-b border-zinc-200">
+    <header className="sticky top-0 z-50 bg-[var(--background)]/80 backdrop-blur-sm border-b border-[var(--border)]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-[var(--accent)] flex items-center justify-center glow-green">
               <span className="text-white font-bold text-sm">S</span>
             </div>
-            <span className="text-lg font-semibold text-zinc-900">Sovereign</span>
+            <span className="text-lg font-semibold text-[var(--foreground)]">
+              Sovereign
+            </span>
           </div>
 
           {/* Navigation */}
           <nav className="hidden md:flex items-center gap-8">
-            <a href="#" className="text-zinc-900 font-medium text-sm">
+            <a href="#" className="text-white font-medium text-sm">
               Swap
             </a>
-            <a href="#" className="text-zinc-500 hover:text-zinc-900 text-sm transition">
-              Pool
-            </a>
-            <a href="#" className="text-zinc-500 hover:text-zinc-900 text-sm transition">
-              Lend
+            <a href="#" className="text-white hover:gray text-sm transition">
+              Debug
             </a>
           </nav>
 

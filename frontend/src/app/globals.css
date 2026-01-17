@@ -1,8 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fafafa;
-  --foreground: #18181b;
+  --background: #0a0f0a;
+  --foreground: #e5f5e5;
+  --card: #0d1a0d;
+  --card-hover: #132013;
+  --border: #1a331a;
+  --border-hover: #225522;
+  --accent: #22c55e;
+  --accent-hover: #16a34a;
+  --accent-muted: rgba(34, 197, 94, 0.15);
+  --text-muted: rgb(6, 6, 6);
+  --text-secondary: #66aa66;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --input-bg: #0f1a0f;
+  --button-primary: #1a4d1a;
+  --button-primary-hover: #1f5d1f;
 }
 
 * {
@@ -22,7 +36,9 @@ body {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
 }
 
 /* Input number arrows removal */
@@ -46,6 +62,33 @@ button:focus {
 }
 
 button:focus-visible {
-  outline: 2px solid #18181b;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--card);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+/* Glow effects */
+.glow-green {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.15);
+}
+
+.glow-green-strong {
+  box-shadow: 0 0 30px rgba(34, 197, 94, 0.25);
 }
