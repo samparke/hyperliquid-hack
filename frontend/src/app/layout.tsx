@@ -1,12 +1,12 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { type ReactNode } from "react";
-import Header from "@/components/Header";
+import Header from "@/app/components/Header";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "TSender",
-  description: "Hyper gas-optimized bulk ERC20 token transfer",
+  title: "Sovereign AMM",
+  description: "Swap tokens with yield-bearing liquidity on Hyperliquid",
 };
 
 export default function RootLayout(props: { children: ReactNode }) {
