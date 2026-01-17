@@ -15,6 +15,9 @@ contract SovereignVault is ISovereignVaultMinimal {
     address public immutable strategist;
     address public immutable usdc;
     address public defaultVault;
+    uint256 totalAllocatedUSDC;
+    uint256 usdcBalance;
+
 
     mapping(address => bool) public authorizedPools;
 
@@ -108,7 +111,8 @@ contract SovereignVault is ISovereignVaultMinimal {
     /// @param vault The vault address to deposit into
     /// @param usdcAmount Amount of USDC to allocate (in EVM decimals, 6)
     function allocate(address vault, uint256 usdcAmount) external onlyStrategist {
-        uint256 usdcBalance = IERC20(usdc).balanceOf(address(this));
+        usdcBalance = IERC20(usdc).balanceOf(address(this));
+        totalAllocatedUSDC += usdcAmount;
 
         CoreWriterLib.bridgeToCore(usdc, usdcAmount);
         CoreWriterLib.vaultTransfer(vault, true, _toU64(usdcAmount));
@@ -120,6 +124,16 @@ contract SovereignVault is ISovereignVaultMinimal {
     function deallocate(address vault, uint256 usdcAmount) external onlyStrategist {
         CoreWriterLib.vaultTransfer(vault, false, _toU64(usdcAmount));
         CoreWriterLib.bridgeToEvm(usdc, usdcAmount);
+        usdcBalance = IERC20(usdc).balanceOf(address(this));
+        totalAllocatedUSDC -= usdcAmount;  
+    }
+
+    function getTotalAllocatedUSDC() external view returns (uint256) {
+        return totalAllocatedUSDC;
+    }
+    
+    function getUSDCBalance() external view returns (uint256) {
+        return usdcBalance;
     }
 
     function claimPoolManagerFees(uint256 _feePoolManager0, uint256 _feePoolManager1) external onlyAuthorizedPool {

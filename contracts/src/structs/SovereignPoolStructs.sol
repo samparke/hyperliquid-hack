@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import {IERC20} from "../../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {IERC20} from "../../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 import {ISwapFeeModule} from "../swap-fee-modules/interfaces/ISwapFeeModule.sol";
 
@@ -36,6 +36,7 @@ struct SwapCache {
 struct SovereignPoolSwapParams {
     bool isSwapCallback;
     bool isZeroToOne;
+    //bool toUsd;
     uint256 amountIn;
     uint256 amountOutMin;
     uint256 deadline;

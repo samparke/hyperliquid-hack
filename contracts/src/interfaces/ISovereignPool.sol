@@ -15,7 +15,7 @@ interface ISovereignPool is IValantisPool {
     event PoolManagerFeesClaimed(uint256 amount0, uint256 amount1);
     event DepositLiquidity(uint256 amount0, uint256 amount1);
     event WithdrawLiquidity(address indexed recipient, uint256 amount0, uint256 amount1);
-    event Swap(address indexed sender, bool isZeroToOne, uint256 amountIn, uint256 fee, uint256 amountOut);
+    event Swap(address indexed sender, bool isZeroToOne, uint256 amountIn, uint256 fee, uint256 amountOut, uint256 usdcBalance);
 
     function getTokens() external view returns (address[] memory tokens);
 

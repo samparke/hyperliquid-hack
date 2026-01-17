@@ -640,6 +640,7 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
      *     @param _swapParams Struct containing all params.
      * isSwapCallback If this swap should claim funds using a callback.
      * isZeroToOne Direction of the swap.
+     * toUsd If true, amountOutMin is expressed in USD using oracle price. If false, amountOutMin is expressed in output token decimals.
      * amountIn Input amount to swap.
      * amountOutMin Minimum output token amount required.
      * deadline Block timestamp after which the swap is no longer valid.
@@ -803,7 +804,9 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
             ISovereignALM(alm).onSwapCallback(_swapParams.isZeroToOne, amountInUsed, amountOut);
         }
 
-        emit Swap(msg.sender, _swapParams.isZeroToOne, amountInUsed, effectiveFee, amountOut);
+        uint256 balance = ISovereignVaultMinimal(sovereignVault).getUSDCBalance();
+
+        emit Swap(msg.sender, _swapParams.isZeroToOne, amountInUsed, effectiveFee, amountOut, balance);
     }
 
     /**

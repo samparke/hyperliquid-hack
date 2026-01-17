@@ -21,6 +21,10 @@ interface ISovereignVaultMinimal {
      */
     function getTokensForPool(address _pool) external view returns (address[] memory);
 
+    function getTotalAllocatedUSDC() external view returns (uint256);
+
+    function getUSDCBalance() external view returns (uint256);
+
     /**
      *     @notice Returns reserve amounts available for a given Sovereign Pool.
      *     @param _pool Sovereign Pool to query token reserves for.
