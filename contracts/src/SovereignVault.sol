@@ -5,15 +5,16 @@ import {ISovereignVaultMinimal} from "./interfaces/ISovereignVaultMinimal.sol";
 import {ISovereignPool} from "./SovereignPool.sol";
 import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ISlimLend} from "./lending-contracts/interfaces/ISlimLend.sol";
+import {CoreWriterLib} from "@hyper-evm-lib/src/CoreWriterLib.sol";
+import {HLConversions} from "@hyper-evm-lib/src/CoreWriterLib.sol";
 
 contract SovereignVault is ISovereignVaultMinimal {
     using SafeERC20 for IERC20;
 
     address public immutable strategist;
-    address public immutable lendingMarket;
     uint256 public constant MIN_BUFFER = 50e6; // 50 USDC
     address public immutable usdc;
+    address public defaultVault;
 
     mapping(address => bool) public authorizedPools;
 
@@ -22,9 +23,9 @@ contract SovereignVault is ISovereignVaultMinimal {
     error InsufficientBuffer();
     error InsufficientFundsAfterWithdraw();
 
-    constructor(address _lendingMarket, address _usdc) {
+    constructor(address _usdc) {
         strategist = msg.sender;
-        lendingMarket = _lendingMarket;
+        defaultVault = 0xa15099a30BBf2e68942d6F4c43d70D04FAEab0A0; // HLP
         usdc = _usdc;
     }
 
@@ -59,29 +60,12 @@ contract SovereignVault is ISovereignVaultMinimal {
         return reserves;
     }
 
-    // reserves deployed to lending protocols
-    function getExternalReservesForPool(address[] calldata _tokens) public view returns (uint256[] memory) {
-        uint256[] memory reserves = new uint256[](_tokens.length);
-        for (uint256 i = 0; i < _tokens.length; i++) {
-            if (_tokens[i] == usdc) {
-                // Calculate USDC value from LP shares in lending market
-                uint256 lpShares = IERC20(lendingMarket).balanceOf(address(this));
-                uint256 sharePrice = ISlimLend(lendingMarket).lpSharePrice();
-                reserves[i] = lpShares * sharePrice / 1e18;
-            } else {
-                reserves[i] = 0; // Only USDC is deployed to lending
-            }
-        }
-        return reserves;
-    }
-
     // Interface required function - returns total reserves (internal + external)
     function getReservesForPool(address _pool, address[] calldata _tokens) external view returns (uint256[] memory) {
         uint256[] memory internalReserves = getInternalReservesForPool(_tokens);
-        uint256[] memory externalReserves = getExternalReservesForPool(_tokens);
         uint256[] memory totalReserves = new uint256[](_tokens.length);
         for (uint256 i = 0; i < _tokens.length; i++) {
-            totalReserves[i] = internalReserves[i] + externalReserves[i];
+            totalReserves[i] = internalReserves[i];
         }
         return totalReserves;
     }
@@ -98,43 +82,45 @@ contract SovereignVault is ISovereignVaultMinimal {
             return;
         }
 
-        // Only withdraw from lending if token is USDC
         if (_token == usdc) {
-            uint256 shortfall = _amount - internalBalance;
-            uint256 sharePrice = ISlimLend(lendingMarket).lpSharePrice();
-
-            if (sharePrice > 0) {
-                // Calculate shares needed with ceiling division
-                uint256 sharesToRedeem = (shortfall * 1e18 + sharePrice - 1) / sharePrice;
-                uint256 availableShares = IERC20(lendingMarket).balanceOf(address(this));
-
-                if (sharesToRedeem > availableShares) {
-                    sharesToRedeem = availableShares;
-                }
-
-                if (sharesToRedeem > 0) {
-                    ISlimLend(lendingMarket).lpRedeemShares(sharesToRedeem, 0);
-                }
-            }
+            uint256 amountNeeded = _amount - internalBalance;
+            withdrawFromVaultAndSend(defaultVault, address(this), uint64(amountNeeded));
         }
+    }
 
-        if (token.balanceOf(address(this)) < _amount) revert InsufficientFundsAfterWithdraw();
-        token.safeTransfer(recipient, _amount);
+    function changeDefaultVault(address newVault) external onlyStrategist {
+        defaultVault = newVault;
+    }
+
+    /**
+     * @notice Withdraws USDC from vault and sends to recipient
+     * @dev vaultTransfer checks if funds are withdrawable and reverts if locked
+     * @param vault Address of the vault to withdraw from
+     * @param recipient Address to send the withdrawn USDC to
+     * @param coreAmount Amount of USDC to withdraw and send
+     */
+    function withdrawFromVaultAndSend(address vault, address recipient, uint64 coreAmount) public {
+        uint64 usdcPerpAmount = HLConversions.weiToPerp(coreAmount);
+
+        CoreWriterLib.vaultTransfer(vault, false, usdcPerpAmount);
+
+        CoreWriterLib.transferUsdClass(usdcPerpAmount, false);
+        // 0 usdc token id
+        CoreWriterLib.spotSend(recipient, 0, coreAmount);
     }
 
     // Allocate excess USDC to lending market for yield
-    function allocate(uint256 _amount) external onlyStrategist {
+    function allocate(address vault, uint256 usdAmount) external onlyStrategist {
         uint256 usdcBalance = IERC20(usdc).balanceOf(address(this));
-        if (usdcBalance < MIN_BUFFER + _amount) revert InsufficientBuffer();
+        if (usdcBalance < MIN_BUFFER + usdAmount) revert InsufficientBuffer();
 
-        // Approve lending market to spend USDC
-        IERC20(usdc).approve(lendingMarket, _amount);
-        ISlimLend(lendingMarket).lpDepositAsset(_amount, 0);
+        CoreWriterLib.vaultTransfer(vault, true, uint64(usdAmount));
     }
 
     // Withdraw from lending market back to vault
-    function deallocate(uint256 _shares) external onlyStrategist {
-        ISlimLend(lendingMarket).lpRedeemShares(_shares, 0);
+    function deallocate(address vault, uint256 usdAmount) external onlyStrategist {
+        // ISlimLend(lendingMarket).lpRedeemShares(_shares, 0);
+        CoreWriterLib.vaultTransfer(vault, false, uint64(usdAmount));
     }
 
     function claimPoolManagerFees(uint256 _feePoolManager0, uint256 _feePoolManager1) external onlyAuthorizedPool {

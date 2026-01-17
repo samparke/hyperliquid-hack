@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "../lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {PrecompileLib} from "./PrecompileLib.sol";
 import {HLConstants} from "./common/HLConstants.sol";
@@ -42,11 +42,11 @@ library CoreWriterLib {
     }
 
     /**
-    * @dev All tokens (including USDC) will be bridged to the spot dex
-    */
+     * @dev All tokens (including USDC) will be bridged to the spot dex
+     */
     function bridgeToCore(uint64 token, uint256 evmAmount) internal {
         ICoreDepositWallet coreDepositWallet = ICoreDepositWallet(HLConstants.coreDepositWallet());
-        
+
         // Check if amount would be 0 after conversion to prevent token loss
         uint64 coreAmount = HLConversions.evmToWei(token, evmAmount);
         if (coreAmount == 0) revert CoreWriterLib__EvmAmountTooSmall(evmAmount);
@@ -229,9 +229,20 @@ library CoreWriterLib {
         );
     }
 
-    function sendAsset(address destination, address subAccount, uint32 source_dex, uint32 destination_dex, uint64 token, uint64 amountWei) internal {
+    function sendAsset(
+        address destination,
+        address subAccount,
+        uint32 source_dex,
+        uint32 destination_dex,
+        uint64 token,
+        uint64 amountWei
+    ) internal {
         coreWriter.sendRawAction(
-            abi.encodePacked(uint8(1), HLConstants.SEND_ASSET_ACTION, abi.encode(destination, subAccount, source_dex, destination_dex, token, amountWei))
+            abi.encodePacked(
+                uint8(1),
+                HLConstants.SEND_ASSET_ACTION,
+                abi.encode(destination, subAccount, source_dex, destination_dex, token, amountWei)
+            )
         );
     }
 }
