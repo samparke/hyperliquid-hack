@@ -87,12 +87,12 @@ contract SovereignVault is ISovereignVaultMinimal {
 
         IERC20 token = IERC20(_token);
         uint256 internalBalance = token.balanceOf(address(this));
-
         if (internalBalance >= _amount) {
+            require(IERC20(token).balanceOf(address(this)) >= _amount, "VAULT_INSUFF_OUT");
             token.safeTransfer(recipient, _amount);
             return;
         }
-
+        require(internalBalance + totalAllocatedUSDC >= _amount, "INSUFFICIENT_BUFFER");
         if (_token == usdc) {
             uint256 amountNeeded = _amount - internalBalance;
 

@@ -7,21 +7,94 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
-import { formatUnits, parseUnits } from "viem";
+import { formatUnits, parseUnits, maxUint256 } from "viem";
 import { ArrowDown, ChevronDown, Loader2, Settings } from "lucide-react";
-import {
-  ADDRESSES,
-  TOKENS,
-  ERC20_ABI,
-  SOVEREIGN_POOL_ABI,
-} from "@/contracts";
+import { TOKENS, ERC20_ABI, SOVEREIGN_POOL_ABI } from "@/contracts";
 
 // Re-export for other components
 export { TOKENS };
-export const SOVEREIGN_POOL_ADDRESS = ADDRESSES.POOL;
+
+// Hard-set to your deployed pool
+export const SOVEREIGN_POOL_ADDRESS =
+  "0x5BaCa1C25D084873C6b9A4D437aC275027C2D94b" as const;
+
+// Your swap fee module (fallback if pool.swapFeeModule() is zero/unset)
+const SWAP_FEE_MODULE_FALLBACK =
+  "0x4AAB075BCa61D7F8618CCab3af878F889892CBc6" as const;
+
+// Minimal ABI for fee module quoting
+const SWAP_FEE_MODULE_ABI = [
+  {
+    type: "function",
+    name: "getSwapFeeInBips",
+    stateMutability: "view",
+    inputs: [
+      { name: "tokenIn", type: "address" },
+      { name: "tokenOut", type: "address" },
+      { name: "amountIn", type: "uint256" },
+      { name: "sender", type: "address" },
+      { name: "ctx", type: "bytes" },
+    ],
+    outputs: [
+      {
+        name: "data",
+        type: "tuple",
+        components: [
+          { name: "feeInBips", type: "uint256" },
+          { name: "internalContext", type: "bytes" },
+        ],
+      },
+    ],
+  },
+] as const;
+
+// Minimal ABI for ALM quoting
+// NOTE: Your ALM returns (isCallbackOnSwap, amountOut, amountInFilled)
+// Your previous ABI had a different order, which breaks parsing.
+const SOVEREIGN_ALM_ABI_MIN = [
+  {
+    type: "function",
+    name: "getLiquidityQuote",
+    stateMutability: "view",
+    inputs: [
+      {
+        name: "_almLiquidityQuoteInput",
+        type: "tuple",
+        components: [
+          { name: "isZeroToOne", type: "bool" },
+          { name: "amountInMinusFee", type: "uint256" },
+          { name: "feeInBips", type: "uint256" },
+          { name: "sender", type: "address" },
+          { name: "recipient", type: "address" },
+          { name: "tokenOutSwap", type: "address" },
+        ],
+      },
+      { name: "", type: "bytes" }, // externalContext
+      { name: "", type: "bytes" }, // verifierData (unused for you)
+    ],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "isCallbackOnSwap", type: "bool" },
+          { name: "amountOut", type: "uint256" },
+          { name: "amountInFilled", type: "uint256" },
+        ],
+      },
+    ],
+  },
+] as const;
+
+// amountInMinusFee exactly like pool:
+// amountInMinusFee = amountIn * 10000 / (10000 + feeBips)
+function amountInMinusFee(amountIn: bigint, feeBips: bigint): bigint {
+  const BIPS = 10_000n;
+  return (amountIn * BIPS) / (BIPS + feeBips);
+}
 
 // ═══════════════════════════════════════════════════════════════
-// Token Input Component (UI consistency pass)
+// Token Input
 // ═══════════════════════════════════════════════════════════════
 function TokenInput({
   label,
@@ -42,7 +115,6 @@ function TokenInput({
 }) {
   return (
     <div className="rounded-3xl bg-[var(--input-bg)] border border-[var(--border)] p-4 sm:p-5">
-      {/* top row */}
       <div className="flex items-center justify-between gap-3 text-xs sm:text-sm text-[var(--text-muted)]">
         <span className="leading-none">{label}</span>
 
@@ -63,7 +135,6 @@ function TokenInput({
         )}
       </div>
 
-      {/* main row */}
       <div className="mt-3 flex items-center gap-3">
         <input
           type="text"
@@ -94,7 +165,7 @@ function TokenInput({
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Main Swap Card (layout/padding/consistency pass)
+// Swap Card
 // ═══════════════════════════════════════════════════════════════
 export default function SwapCard() {
   const { address, isConnected } = useAccount();
@@ -104,13 +175,18 @@ export default function SwapCard() {
   const [amountOut, setAmountOut] = useState("");
   const [slippage, setSlippage] = useState("0.5");
   const [showSettings, setShowSettings] = useState(false);
+
+  // Track latest tx for UI only (approve OR swap)
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+
+  // Force the allowance cache to refresh after approvals
+  const [approvalNonce, setApprovalNonce] = useState(0);
 
   const buyToken = sellToken === "PURR" ? "USDC" : "PURR";
   const tokenIn = TOKENS[sellToken];
   const tokenOut = TOKENS[buyToken];
 
-  // Parse amount
+  // Parse amount in
   const amountInParsed = useMemo(() => {
     if (!amountIn || isNaN(Number(amountIn))) return 0n;
     try {
@@ -120,7 +196,45 @@ export default function SwapCard() {
     }
   }, [amountIn, tokenIn.decimals]);
 
-  // Get balance
+  // Pool reads
+  const { data: poolToken0 } = useReadContract({
+    address: SOVEREIGN_POOL_ADDRESS,
+    abi: SOVEREIGN_POOL_ABI,
+    functionName: "token0",
+    query: { enabled: true },
+  });
+
+  const { data: poolAlm } = useReadContract({
+    address: SOVEREIGN_POOL_ADDRESS,
+    abi: SOVEREIGN_POOL_ABI,
+    functionName: "alm",
+    query: { enabled: true },
+  });
+
+  const { data: poolSwapFeeModule } = useReadContract({
+    address: SOVEREIGN_POOL_ADDRESS,
+    abi: SOVEREIGN_POOL_ABI,
+    functionName: "swapFeeModule",
+    query: { enabled: true },
+  });
+
+  // Swap direction based on actual token0
+  const isZeroToOne = useMemo(() => {
+    if (!poolToken0) return sellToken === "PURR"; // fallback
+    return (
+      tokenIn.address.toLowerCase() === (poolToken0 as string).toLowerCase()
+    );
+  }, [poolToken0, tokenIn.address, sellToken]);
+
+  // Fee module address
+  const feeModuleAddress = useMemo(() => {
+    const mod = (poolSwapFeeModule as string | undefined) || "";
+    const isZero =
+      !mod || mod === "0x0000000000000000000000000000000000000000";
+    return (isZero ? SWAP_FEE_MODULE_FALLBACK : mod) as `0x${string}`;
+  }, [poolSwapFeeModule]);
+
+  // Balance
   const { data: balanceRaw } = useReadContract({
     address: tokenIn.address,
     abi: [
@@ -141,19 +255,116 @@ export default function SwapCard() {
     ? formatUnits(balanceRaw, tokenIn.decimals)
     : undefined;
 
-  // Get allowance
-  const { data: allowance } = useReadContract({
+  // Allowance (keyed by approvalNonce so it re-queries after approve confirms)
+  const {
+    data: allowance,
+    refetch: refetchAllowance,
+    queryKey: _allowanceKey, // not used, but keeps TS happy if wagmi exposes it
+  } = useReadContract({
     address: tokenIn.address,
     abi: ERC20_ABI,
     functionName: "allowance",
     args: address ? [address, SOVEREIGN_POOL_ADDRESS] : undefined,
-    query: { enabled: !!address && amountInParsed > 0n },
+    query: {
+      enabled: !!address && amountInParsed > 0n,
+      // ensure we don't keep stale allowance around
+      staleTime: 0,
+      gcTime: 0,
+    },
+    // @ts-expect-error wagmi v2 supports scopeKey; if yours doesn't, remove it.
+    scopeKey: `allowance-${sellToken}-${approvalNonce}`,
   });
 
   const needsApproval = useMemo(() => {
-    if (!amountInParsed || !allowance) return false;
+    if (!amountInParsed) return false;
+    if (allowance === undefined) return false;
     return allowance < amountInParsed;
   }, [amountInParsed, allowance]);
+
+  // Fee bips
+  const { data: feeDataRaw } = useReadContract({
+    address: feeModuleAddress,
+    abi: SWAP_FEE_MODULE_ABI,
+    functionName: "getSwapFeeInBips",
+    args:
+      amountInParsed > 0n
+        ? [
+            tokenIn.address,
+            tokenOut.address,
+            amountInParsed,
+            (address ??
+              "0x0000000000000000000000000000000000000000") as `0x${string}`,
+            "0x",
+          ]
+        : undefined,
+    query: { enabled: amountInParsed > 0n },
+  });
+
+  const feeBips = useMemo(() => {
+    const v: any = feeDataRaw;
+    // viem returns the tuple object directly: { feeInBips, internalContext }
+    const fee = v?.feeInBips;
+    if (fee == null) return 0n;
+    try {
+      return BigInt(fee);
+    } catch {
+      return 0n;
+    }
+  }, [feeDataRaw]);
+
+  const feePct = useMemo(() => Number(feeBips) / 100, [feeBips]);
+
+  // amountInMinusFee per pool
+  const amountInMinus = useMemo(() => {
+    if (amountInParsed <= 0n) return 0n;
+    return amountInMinusFee(amountInParsed, feeBips);
+  }, [amountInParsed, feeBips]);
+
+  // ALM quote
+  const { data: almQuoteRaw, isLoading: quoteLoading } = useReadContract({
+    address: (poolAlm as `0x${string}`) || undefined,
+    abi: SOVEREIGN_ALM_ABI_MIN,
+    functionName: "getLiquidityQuote",
+    args:
+      amountInParsed > 0n && poolAlm
+        ? [
+            {
+              isZeroToOne,
+              amountInMinusFee: amountInMinus,
+              feeInBips: feeBips,
+              sender: (address ??
+                "0x0000000000000000000000000000000000000000") as `0x${string}`,
+              recipient: (address ??
+                "0x0000000000000000000000000000000000000000") as `0x${string}`,
+              tokenOutSwap: tokenOut.address,
+            },
+            "0x",
+            "0x",
+          ]
+        : undefined,
+    query: { enabled: amountInParsed > 0n && !!poolAlm },
+  });
+
+  const quotedOut = useMemo(() => {
+    const q: any = almQuoteRaw;
+    const out = q?.amountOut;
+    if (out == null) return 0n;
+    try {
+      return BigInt(out);
+    } catch {
+      return 0n;
+    }
+  }, [almQuoteRaw]);
+
+  // Sync amountOut UI
+  useEffect(() => {
+    if (!amountIn || Number(amountIn) === 0 || amountInParsed === 0n) {
+      setAmountOut("");
+      return;
+    }
+    if (quotedOut > 0n) setAmountOut(formatUnits(quotedOut, tokenOut.decimals));
+    else setAmountOut("");
+  }, [amountIn, amountInParsed, quotedOut, tokenOut.decimals]);
 
   // Writes + receipt
   const { writeContractAsync, isPending } = useWriteContract();
@@ -162,20 +373,17 @@ export default function SwapCard() {
   });
   const isLoading = isPending || isConfirming;
 
-  // Mock quote
+  // After ANY tx confirms, if it was an approval, refresh allowance.
+  // Easiest: always refetch allowance on success.
   useEffect(() => {
-    if (!amountIn || Number(amountIn) === 0) {
-      setAmountOut("");
-      return;
-    }
-
-    const purrPrice = 4.7;
-    const inputAmount = Number(amountIn);
-
-    if (sellToken === "PURR")
-      setAmountOut((inputAmount * purrPrice * 0.997).toFixed(6));
-    else setAmountOut(((inputAmount / purrPrice) * 0.997).toFixed(5));
-  }, [amountIn, sellToken]);
+    if (!isSuccess) return;
+    // bump nonce to force query key change + refetch explicitly
+    setApprovalNonce((n) => n + 1);
+    refetchAllowance?.();
+    // (optional) clear txHash so "Confirming..." doesn't stick across actions
+    setTxHash(undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuccess]);
 
   // Actions
   const handleFlip = () => {
@@ -188,14 +396,15 @@ export default function SwapCard() {
     if (balance) setAmountIn(balance);
   };
 
+  // Approve MAX so you don't get stuck approving repeatedly
   const handleApprove = async () => {
-    if (!address || !amountInParsed) return;
+    if (!address) return;
     try {
       const hash = await writeContractAsync({
         address: tokenIn.address,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [SOVEREIGN_POOL_ADDRESS, amountInParsed],
+        args: [SOVEREIGN_POOL_ADDRESS, maxUint256],
       });
       setTxHash(hash);
     } catch (err) {
@@ -208,15 +417,15 @@ export default function SwapCard() {
 
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 20);
     const slippageBps = Math.floor(Number(slippage) * 100);
-    const minOut = amountOut
-      ? (BigInt(Math.floor(Number(amountOut) * 10 ** tokenOut.decimals)) *
-          BigInt(10000 - slippageBps)) /
-        10000n
-      : 0n;
+
+    const minOut =
+      quotedOut > 0n
+        ? (quotedOut * BigInt(10_000 - slippageBps)) / 10_000n
+        : 0n;
 
     const params = {
       isSwapCallback: false,
-      isZeroToOne: sellToken === "PURR",
+      isZeroToOne,
       amountIn: amountInParsed,
       amountOutMin: minOut,
       deadline,
@@ -257,8 +466,17 @@ export default function SwapCard() {
         disabled: false,
         action: handleApprove,
       };
+    if (amountInParsed > 0n && quoteLoading) return { text: "Quoting...", disabled: true };
+    if (quotedOut === 0n) return { text: "No quote", disabled: true };
     return { text: "Swap", disabled: false, action: handleSwap };
   })();
+
+  const shownRate = useMemo(() => {
+    const ain = Number(amountIn);
+    const aout = Number(amountOut);
+    if (!ain || !aout || ain <= 0 || aout <= 0) return "";
+    return (aout / ain).toFixed(6);
+  }, [amountIn, amountOut]);
 
   return (
     <div className="w-full">
@@ -318,7 +536,6 @@ export default function SwapCard() {
 
         {/* body */}
         <div className="mt-5">
-          {/* Inputs wrapper (allows clean flip placement without negative margins) */}
           <div className="relative space-y-3">
             <TokenInput
               label="Sell"
@@ -341,12 +558,7 @@ export default function SwapCard() {
               </button>
             </div>
 
-            <TokenInput
-              label="Buy"
-              token={tokenOut}
-              amount={amountOut}
-              readOnly
-            />
+            <TokenInput label="Buy" token={tokenOut} amount={amountOut} readOnly />
           </div>
         </div>
 
@@ -356,15 +568,18 @@ export default function SwapCard() {
             <div className="flex items-center justify-between gap-3 text-[var(--text-muted)]">
               <span>Rate</span>
               <span className="text-[var(--foreground)] text-right">
-                1 {tokenIn.symbol} ={" "}
-                {(Number(amountOut) / Number(amountIn)).toFixed(6)}{" "}
-                {tokenOut.symbol}
+                1 {tokenIn.symbol} = {shownRate} {tokenOut.symbol}
               </span>
             </div>
 
             <div className="flex items-center justify-between gap-3 text-[var(--text-muted)] mt-2">
-              <span>Fee</span>
-              <span className="text-[var(--foreground)]">0.3%</span>
+              <span>Fee (dynamic)</span>
+              <span className="text-[var(--foreground)]">
+                {feePct.toFixed(2)}%{" "}
+                <span className="text-[var(--text-muted)]">
+                  ({feeBips.toString()} bips)
+                </span>
+              </span>
             </div>
 
             <div className="flex items-center justify-between gap-3 text-[var(--text-muted)] mt-2">
@@ -391,10 +606,10 @@ export default function SwapCard() {
             </span>
           </button>
 
-          {isSuccess && txHash && (
-            <div className="mt-4 rounded-2xl bg-[var(--accent-muted)] border border-[var(--accent)] p-4 text-center">
-              <p className="text-[var(--accent)] text-sm">
-                Swap successful!{" "}
+          {txHash && (
+            <div className="mt-4 rounded-2xl bg-[var(--accent-muted)] border border-[var(--border)] p-4 text-center">
+              <p className="text-[var(--text-muted)] text-sm">
+                Tx:{" "}
                 <a
                   href={`https://explorer.hyperliquid-testnet.xyz/tx/${txHash}`}
                   target="_blank"
@@ -406,6 +621,24 @@ export default function SwapCard() {
               </p>
             </div>
           )}
+        </div>
+
+        {/* debug footer */}
+        <div className="mt-4 text-xs text-[var(--text-muted)]">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <span>
+              Pool: <span className="font-mono">{SOVEREIGN_POOL_ADDRESS}</span>
+            </span>
+            <span>
+              FeeModule: <span className="font-mono">{feeModuleAddress}</span>
+            </span>
+            <span>
+              ALM: <span className="font-mono">{(poolAlm as string) || "-"}</span>
+            </span>
+            <span>
+              token0: <span className="font-mono">{(poolToken0 as string) || "-"}</span>
+            </span>
+          </div>
         </div>
       </div>
     </div>

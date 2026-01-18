@@ -1071,14 +1071,157 @@ export const SOVEREIGN_VAULT_ABI = [
   },
 ] as const;
 
-// SovereignALM ABI - Spot price oracle
+export const FEE_MODULE_ABI = [
+  {
+    name: "baseFeeBips",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "minFeeBips",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "maxFeeBips",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "deadzoneImbalanceBips",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "penaltySlopeBipsPerPct",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "discountSlopeBipsPerPct",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "invertPurrPx",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    name: "spotIndexPURR",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint64" }],
+  },
+  {
+    name: "sovereignPool",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "usdc",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "purr",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    name: "getSwapFeeInBips",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "tokenIn", type: "address" },
+      { name: "tokenOut", type: "address" },
+      { name: "amountIn", type: "uint256" },
+      { name: "", type: "address" },
+      { name: "", type: "bytes" },
+    ],
+    outputs: [
+      {
+        name: "data",
+        type: "tuple",
+        components: [
+          { name: "feeInBips", type: "uint256" },
+          { name: "internalContext", type: "bytes" },
+        ],
+      },
+    ],
+  },
+  // overload #1
+  {
+    name: "callbackOnSwapEnd",
+    type: "function",
+    stateMutability: "pure",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "int24" },
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "feeInBips", type: "uint256" },
+          { name: "internalContext", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+  // overload #2
+  {
+    name: "callbackOnSwapEnd",
+    type: "function",
+    stateMutability: "pure",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "feeInBips", type: "uint256" },
+          { name: "internalContext", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+] as const;
+
+// ALM ABI (SovereignALM)
 export const SOVEREIGN_ALM_ABI = [
   {
     name: "pool",
     type: "function",
     stateMutability: "view",
     inputs: [],
-    outputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "address" }], // ISovereignPool
   },
   {
     name: "token0",
@@ -1101,12 +1244,17 @@ export const SOVEREIGN_ALM_ABI = [
     inputs: [],
     outputs: [
       {
-        name: "",
+        name: "info",
         type: "tuple",
         components: [
-          { name: "spotIndex", type: "uint32" },
+          { name: "name", type: "string" },
+          { name: "spots", type: "uint64[]" },
+          { name: "deployerTradingFeeShare", type: "uint64" },
+          { name: "deployer", type: "address" },
+          { name: "evmContract", type: "address" },
           { name: "szDecimals", type: "uint8" },
-          { name: "tokenAddress", type: "address" },
+          { name: "weiDecimals", type: "uint8" },
+          { name: "evmExtraWeiDecimals", type: "int8" },
         ],
       },
     ],
@@ -1128,8 +1276,8 @@ export const SOVEREIGN_ALM_ABI = [
           { name: "tokenOutSwap", type: "address" },
         ],
       },
-      { name: "_externalContext", type: "bytes" },
-      { name: "_verifierData", type: "bytes" },
+      { name: "", type: "bytes" },
+      { name: "", type: "bytes" },
     ],
     outputs: [
       {
@@ -1142,6 +1290,28 @@ export const SOVEREIGN_ALM_ABI = [
         ],
       },
     ],
+  },
+  {
+    name: "onDepositLiquidityCallback",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+      { name: "", type: "bytes" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "onSwapCallback",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "", type: "bool" },
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+    ],
+    outputs: [],
   },
 ] as const;
 

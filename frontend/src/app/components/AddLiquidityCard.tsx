@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   useAccount,
   useReadContract,
@@ -9,10 +9,14 @@ import {
 } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
 import { Plus, Loader2, ChevronDown } from "lucide-react";
-import { ADDRESSES, TOKENS, ERC20_ABI } from "@/contracts";
+import { TOKENS, ERC20_ABI } from "@/contracts";
+
+// Vault address (recipient)
+const VAULT_ADDRESS =
+  "0xDFaAade487B32062D7Ea5c06fA480a822b325A80" as const;
 
 // ═══════════════════════════════════════════════════════════════
-// Token Input Component (reused from SwapCard)
+// Token Input Component
 // ═══════════════════════════════════════════════════════════════
 function TokenInput({
   label,
@@ -40,6 +44,7 @@ function TokenInput({
               <button
                 onClick={onMaxClick}
                 className="text-[var(--accent)] font-medium hover:text-[var(--accent-hover)] ml-1"
+                type="button"
               >
                 MAX
               </button>
@@ -47,6 +52,7 @@ function TokenInput({
           </span>
         )}
       </div>
+
       <div className="flex items-center gap-3">
         <input
           type="text"
@@ -56,8 +62,12 @@ function TokenInput({
           }
           placeholder="0"
           className="bg-transparent text-3xl font-medium text-[var(--foreground)] placeholder-[var(--text-secondary)] outline-none flex-1 min-w-0"
+          inputMode="decimal"
         />
-        <button className="flex items-center gap-2 bg-[var(--input-bg)] px-3 py-2 rounded-xl font-medium text-[var(--foreground)] hover:bg-[var(--card-hover)] border border-[var(--border)]">
+        <button
+          className="flex items-center gap-2 bg-[var(--input-bg)] px-3 py-2 rounded-xl font-medium text-[var(--foreground)] hover:bg-[var(--card-hover)] border border-[var(--border)]"
+          type="button"
+        >
           <div className="w-6 h-6 rounded-full bg-[var(--accent-muted)] flex items-center justify-center text-xs font-bold text-[var(--accent)]">
             {token.symbol[0]}
           </div>
@@ -70,14 +80,17 @@ function TokenInput({
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Main Add Liquidity Card
+// Main "Deposit to Vault" Card (plain ERC20 transfers)
 // ═══════════════════════════════════════════════════════════════
 export default function AddLiquidityCard() {
   const { address, isConnected } = useAccount();
 
   const [amount0, setAmount0] = useState("");
   const [amount1, setAmount1] = useState("");
-  const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+
+  // We'll track 2 separate tx hashes (one for each token transfer)
+  const [txHash0, setTxHash0] = useState<`0x${string}` | undefined>();
+  const [txHash1, setTxHash1] = useState<`0x${string}` | undefined>();
 
   const token0 = TOKENS.PURR;
   const token1 = TOKENS.USDC;
@@ -101,8 +114,8 @@ export default function AddLiquidityCard() {
     }
   }, [amount1, token1.decimals]);
 
-  // Get token balances
-  const { data: balance0Raw } = useReadContract({
+  // Read balances
+  const { data: balance0Raw, refetch: refetchBalance0 } = useReadContract({
     address: token0.address,
     abi: ERC20_ABI,
     functionName: "balanceOf",
@@ -110,7 +123,7 @@ export default function AddLiquidityCard() {
     query: { enabled: !!address },
   });
 
-  const { data: balance1Raw } = useReadContract({
+  const { data: balance1Raw, refetch: refetchBalance1 } = useReadContract({
     address: token1.address,
     abi: ERC20_ABI,
     functionName: "balanceOf",
@@ -125,83 +138,22 @@ export default function AddLiquidityCard() {
     ? formatUnits(balance1Raw, token1.decimals)
     : undefined;
 
-  // Get allowances
-  const { data: allowance0 } = useReadContract({
-    address: token0.address,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: address ? [address, ADDRESSES.POOL] : undefined,
-    query: { enabled: !!address && amount0Parsed > 0n },
-  });
-
-  const { data: allowance1 } = useReadContract({
-    address: token1.address,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: address ? [address, ADDRESSES.POOL] : undefined,
-    query: { enabled: !!address && amount1Parsed > 0n },
-  });
-
-  const needsApproval0 =
-    amount0Parsed > 0n &&
-    allowance0 !== undefined &&
-    allowance0 < amount0Parsed;
-  const needsApproval1 =
-    amount1Parsed > 0n &&
-    allowance1 !== undefined &&
-    allowance1 < amount1Parsed;
-
-  // Contract writes
+  // Write
   const { writeContractAsync, isPending } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
-    hash: txHash,
-  });
 
-  const isLoading = isPending || isConfirming;
-
-  // Approve token0
-  const handleApprove0 = async () => {
-    if (!address || !amount0Parsed) return;
-    try {
-      const hash = await writeContractAsync({
-        address: token0.address,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [ADDRESSES.POOL, amount0Parsed],
-      });
-      setTxHash(hash);
-    } catch (err) {
-      console.error("Approve failed:", err);
-    }
-  };
-
-  // Approve token1
-  const handleApprove1 = async () => {
-    if (!address || !amount1Parsed) return;
-    try {
-      const hash = await writeContractAsync({
-        address: token1.address,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [ADDRESSES.POOL, amount1Parsed],
-      });
-      setTxHash(hash);
-    } catch (err) {
-      console.error("Approve failed:", err);
-    }
-  };
-
-  // Add liquidity (placeholder - needs proper ALM/vault integration)
-  const handleAddLiquidity = async () => {
-    if (!address || !amount0Parsed || !amount1Parsed) return;
-    // TODO: Implement actual liquidity deposit through ALM/vault
-    console.log("Add liquidity:", {
-      amount0: amount0Parsed,
-      amount1: amount1Parsed,
+  // Wait for receipts
+  const { isLoading: confirming0, isSuccess: success0 } =
+    useWaitForTransactionReceipt({
+      hash: txHash0,
     });
-  };
 
-  // Max buttons
+  const { isLoading: confirming1, isSuccess: success1 } =
+    useWaitForTransactionReceipt({
+      hash: txHash1,
+    });
+
+  const isLoading = isPending || confirming0 || confirming1;
+
   const handleMax0 = () => {
     if (balance0) setAmount0(balance0);
   };
@@ -210,42 +162,69 @@ export default function AddLiquidityCard() {
     if (balance1) setAmount1(balance1);
   };
 
-  // Button state
-  const getButtonState = () => {
-    if (!isConnected) return { text: "Connect Wallet", disabled: true };
-    if (
-      (!amount0 || Number(amount0) === 0) &&
-      (!amount1 || Number(amount1) === 0)
-    )
-      return { text: "Enter amounts", disabled: true };
-    if (isLoading) return { text: "Confirming...", disabled: true };
-    if (needsApproval0)
-      return {
-        text: `Approve ${token0.symbol}`,
-        disabled: false,
-        action: handleApprove0,
-      };
-    if (needsApproval1)
-      return {
-        text: `Approve ${token1.symbol}`,
-        disabled: false,
-        action: handleApprove1,
-      };
-    return {
-      text: "Add Liquidity",
-      disabled: false,
-      action: handleAddLiquidity,
-    };
+  // Do two transfers sequentially (PURR then USDC) if the user entered both.
+  const handleSendToVault = async () => {
+    if (!address) return;
+
+    try {
+      // Transfer token0 if amount > 0
+      if (amount0Parsed > 0n) {
+        const hash0 = await writeContractAsync({
+          address: token0.address,
+          abi: ERC20_ABI,
+          functionName: "transfer",
+          args: [VAULT_ADDRESS, amount0Parsed],
+        });
+        setTxHash0(hash0);
+        // optional: wait for confirmation before sending the second
+        // (keeps UX simple / predictable)
+        // NOTE: wagmi receipt hook will also confirm, but we can proceed anyway.
+      }
+
+      // Transfer token1 if amount > 0
+      if (amount1Parsed > 0n) {
+        const hash1 = await writeContractAsync({
+          address: token1.address,
+          abi: ERC20_ABI,
+          functionName: "transfer",
+          args: [VAULT_ADDRESS, amount1Parsed],
+        });
+        setTxHash1(hash1);
+      }
+
+      // Refresh balances
+      refetchBalance0?.();
+      refetchBalance1?.();
+    } catch (err) {
+      console.error("Transfer to vault failed:", err);
+    }
   };
 
-  const buttonState = getButtonState();
+  const buttonState = useMemo(() => {
+    if (!isConnected) return { text: "Connect Wallet", disabled: true as const };
+
+    const hasAny =
+      (amount0 && Number(amount0) > 0) || (amount1 && Number(amount1) > 0);
+
+    if (!hasAny) return { text: "Enter amounts", disabled: true as const };
+    if (isLoading) return { text: "Confirming...", disabled: true as const };
+
+    return {
+      text: "Send to Vault",
+      disabled: false as const,
+      action: handleSendToVault,
+    };
+  }, [isConnected, amount0, amount1, isLoading]);
 
   return (
     <div className="w-full">
       <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-4 shadow-lg glow-green">
-        <h2 className="text-lg font-semibold text-[var(--foreground)] mb-4">
-          Add Liquidity
+        <h2 className="text-lg font-semibold text-[var(--foreground)] mb-1">
+          Deposit to Vault
         </h2>
+        <p className="text-xs text-[var(--text-muted)] mb-4 break-all">
+          Vault: <span className="text-[var(--foreground)]">{VAULT_ADDRESS}</span>
+        </p>
 
         {/* Token 0 */}
         <TokenInput
@@ -274,16 +253,6 @@ export default function AddLiquidityCard() {
           onMaxClick={handleMax1}
         />
 
-        {/* Info */}
-        {(amount0 || amount1) && (
-          <div className="mt-4 p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--border)] text-sm">
-            <div className="flex justify-between text-[var(--text-muted)]">
-              <span>Share of Pool</span>
-              <span className="text-[var(--foreground)]">-</span>
-            </div>
-          </div>
-        )}
-
         {/* Action button */}
         <button
           onClick={buttonState.action}
@@ -293,6 +262,7 @@ export default function AddLiquidityCard() {
               ? "bg-[var(--input-bg)] text-[var(--text-secondary)] cursor-not-allowed"
               : "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] glow-green-strong"
           }`}
+          type="button"
         >
           <span className="flex items-center justify-center gap-2">
             {isLoading && <Loader2 size={20} className="animate-spin" />}
@@ -300,20 +270,39 @@ export default function AddLiquidityCard() {
           </span>
         </button>
 
-        {/* Success message */}
-        {isSuccess && txHash && (
-          <div className="mt-4 p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--accent)] text-center">
-            <p className="text-[var(--accent)] text-sm">
-              Transaction successful!{" "}
-              <a
-                href={`https://explorer.hyperliquid-testnet.xyz/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline font-medium"
-              >
-                View transaction
-              </a>
-            </p>
+        {/* Success messages */}
+        {(success0 || success1) && (
+          <div className="mt-4 space-y-2">
+            {success0 && txHash0 && (
+              <div className="p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--accent)] text-center">
+                <p className="text-[var(--accent)] text-sm">
+                  PURR transfer confirmed.{" "}
+                  <a
+                    href={`https://explorer.hyperliquid-testnet.xyz/tx/${txHash0}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline font-medium"
+                  >
+                    View
+                  </a>
+                </p>
+              </div>
+            )}
+            {success1 && txHash1 && (
+              <div className="p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--accent)] text-center">
+                <p className="text-[var(--accent)] text-sm">
+                  USDC transfer confirmed.{" "}
+                  <a
+                    href={`https://explorer.hyperliquid-testnet.xyz/tx/${txHash1}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline font-medium"
+                  >
+                    View
+                  </a>
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -3,12 +3,11 @@ import json
 import math
 import time
 import asyncio
-from typing import Any, Dict, List, Optional, Set, Deque, Tuple
-from collections import deque
+import traceback
+from typing import Any, Dict, List, Optional, Set
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from web3 import Web3
 import websockets
@@ -58,18 +57,28 @@ SOVEREIGN_VAULT_ADDRESS = Web3.to_checksum_address(SOVEREIGN_VAULT_ADDRESS)
 USDC_ADDRESS = Web3.to_checksum_address(USDC_ADDRESS)
 WATCH_POOL = Web3.to_checksum_address(WATCH_POOL)
 
+print("[boot] CWD =", os.getcwd(), flush=True)
+print("[boot] ENABLE_HL_TRADING =", ENABLE_HL_TRADING, flush=True)
+print("[boot] WATCH_POOL =", WATCH_POOL, "len=", len(WATCH_POOL), flush=True)
+print("[boot] ALCHEMY_WSS_URL =", (ALCHEMY_WSS_URL[:80] + "...") if ALCHEMY_WSS_URL else None, flush=True)
+
 # -----------------------------
 # ABIs (minimal)
 # -----------------------------
 SOVEREIGN_VAULT_ABI = [
-    {"type":"function","name":"defaultVault","stateMutability":"view","inputs":[],"outputs":[{"name":"","type":"address"}]},
+    {"type": "function", "name": "defaultVault", "stateMutability": "view", "inputs": [], "outputs": [{"name": "", "type": "address"}]},
 ]
 ERC20_ABI = [
-    {"type":"function","name":"balanceOf","stateMutability":"view","inputs":[{"name":"account","type":"address"}],"outputs":[{"name":"","type":"uint256"}]},
+    {"type": "function", "name": "balanceOf", "stateMutability": "view", "inputs": [{"name": "account", "type": "address"}], "outputs": [{"name": "", "type": "uint256"}]},
 ]
 
 # event Swap(address indexed sender, bool isZeroToOne, uint256 amountIn, uint256 fee, uint256 amountOut, int256 usdcDelta);
-SWAP_TOPIC0 = Web3.keccak(text="Swap(address,bool,uint256,uint256,uint256,int256)").hex()
+# event Swap(address indexed sender, bool isZeroToOne, uint256 amountIn, uint256 fee, uint256 amountOut, int256 usdcDelta);
+SWAP_TOPIC0 = Web3.to_hex(Web3.keccak(text="Swap(address,bool,uint256,uint256,uint256,int256)"))
+
+# Debug + validation
+print("[boot] SWAP_TOPIC0 =", SWAP_TOPIC0, "len=", len(SWAP_TOPIC0), flush=True)
+assert SWAP_TOPIC0.startswith("0x") and len(SWAP_TOPIC0) == 66, f"bad topic0: {SWAP_TOPIC0}"
 
 # -----------------------------
 # Web3 clients
@@ -85,7 +94,6 @@ usdc_contract = w3_http.eth.contract(address=USDC_ADDRESS, abi=ERC20_ABI)
 # Hyperliquid SDK (hedging)
 # -----------------------------
 if ENABLE_HL_TRADING:
-    # pip install hyperliquid-python-sdk eth-account
     import eth_account
     from hyperliquid.info import Info
     from hyperliquid.exchange import Exchange
@@ -104,17 +112,13 @@ if ENABLE_HL_TRADING:
 # -----------------------------
 # App + State
 # -----------------------------
-app = FastAPI(title="Swap Listener + HL Hedge (PURR/USDC)", version="1.0.0")
-
 state_lock = asyncio.Lock()
 CLIENTS: Set[WebSocket] = set()
 EVENTS: List[Dict[str, Any]] = []
 
-# Hedge concurrency + cooldown
 hedge_lock = asyncio.Lock()
 last_hedge_ms = 0
 
-# Cached market decimals
 purr_sz_decimals: Optional[int] = None
 
 # -----------------------------
@@ -143,7 +147,7 @@ def decode_swap_log(log: dict) -> Dict[str, Any]:
 
     data_bytes = Web3.to_bytes(hexstr=log["data"])
     isZeroToOne, amountIn, fee, amountOut, usdcDelta = w3_http.codec.decode(
-        ["bool","uint256","uint256","uint256","int256"],
+        ["bool", "uint256", "uint256", "uint256", "int256"],
         data_bytes
     )
 
@@ -157,7 +161,7 @@ def decode_swap_log(log: dict) -> Dict[str, Any]:
         "amountIn": int(amountIn),
         "fee": int(fee),
         "amountOut": int(amountOut),
-        "usdcDelta": int(usdcDelta),  # signed micro-USDC delta
+        "usdcDelta": int(usdcDelta),
         "txHash": log.get("transactionHash"),
         "blockNumber": block_number,
     }
@@ -171,15 +175,10 @@ def round_down(x: float, decimals: int) -> float:
     return math.floor(x * m) / m
 
 async def init_market_decimals() -> None:
-    """
-    Fetch spot meta once to get szDecimals for SPOT_MARKET.
-    """
     global purr_sz_decimals
     if not ENABLE_HL_TRADING:
         return
 
-    # SDK Info object caches name_to_coin and asset_to_sz_decimals internally
-    # Resolve asset id for name and read sz decimals from SDK mapping.
     def _fetch():
         asset = hl_info.name_to_asset(SPOT_MARKET)
         return int(hl_info.asset_to_sz_decimals[asset])
@@ -187,10 +186,6 @@ async def init_market_decimals() -> None:
     purr_sz_decimals = await asyncio.to_thread(_fetch)
 
 async def get_spot_balances() -> Dict[str, float]:
-    """
-    Returns dict coin->total balance as float strings converted to float.
-    Useful to avoid failing orders due to insufficient inventory.
-    """
     if not ENABLE_HL_TRADING:
         return {}
 
@@ -206,25 +201,15 @@ async def get_spot_balances() -> Dict[str, float]:
     return await asyncio.to_thread(_fetch)
 
 async def execute_spot_hedge(usdc_amount_micro: int, toUsd: bool) -> Dict[str, Any]:
-    """
-    toUsd=True  => sell PURR for USDC (hit bids)
-    toUsd=False => buy PURR with USDC (lift asks)
-
-    Uses IOC sweep across top book levels.
-    """
     if not ENABLE_HL_TRADING:
         return {"ok": False, "reason": "ENABLE_HL_TRADING=false"}
 
     assert purr_sz_decimals is not None, "market decimals not initialized"
 
-    # Cap per swap event
     usdc_amount_micro = min(usdc_amount_micro, MAX_HEDGE_USDC_MICRO_PER_SWAP)
-
     remaining_usdc = micro_to_usdc(usdc_amount_micro)
 
-    # Balance checks (optional but recommended)
     balances = await get_spot_balances()
-    # Note: In HL spot, coin name for PURR/USDC may be "PURR" in balances
     avail_usdc = balances.get("USDC", 0.0)
     avail_purr = balances.get("PURR", 0.0)
 
@@ -233,11 +218,9 @@ async def execute_spot_hedge(usdc_amount_micro: int, toUsd: bool) -> Dict[str, A
     if toUsd and avail_purr <= 0:
         return {"ok": False, "reason": "no PURR available on HL account"}
 
-    # If buying, cap to available USDC
     if not toUsd:
         remaining_usdc = min(remaining_usdc, avail_usdc)
 
-    # If selling, cap sell size by available PURR. We'll derive max PURR we *might* need from best bid.
     snap = await asyncio.to_thread(hl_info.l2_snapshot, SPOT_MARKET)
     bids = snap.get("levels", [[], []])[0]
     asks = snap.get("levels", [[], []])[1]
@@ -247,8 +230,7 @@ async def execute_spot_hedge(usdc_amount_micro: int, toUsd: bool) -> Dict[str, A
     if (not toUsd) and not asks:
         return {"ok": False, "reason": "empty asks"}
 
-    book = bids if toUsd else asks
-    book = book[:MAX_BOOK_LEVELS]
+    book = (bids if toUsd else asks)[:MAX_BOOK_LEVELS]
     is_buy = not toUsd
 
     fills = []
@@ -265,7 +247,6 @@ async def execute_spot_hedge(usdc_amount_micro: int, toUsd: bool) -> Dict[str, A
         desired_sz = remaining_usdc / px
         take_sz = min(lvl_sz, desired_sz)
 
-        # If selling, cap by remaining PURR
         if toUsd:
             take_sz = min(take_sz, avail_purr)
             if take_sz <= 0:
@@ -275,7 +256,6 @@ async def execute_spot_hedge(usdc_amount_micro: int, toUsd: bool) -> Dict[str, A
         if take_sz <= 0:
             continue
 
-        # IOC at that level price
         order_type = {"limit": {"tif": "Ioc"}}
         res = await asyncio.to_thread(hl_exchange.order, SPOT_MARKET, is_buy, px, take_sz, order_type)
 
@@ -295,11 +275,6 @@ async def execute_spot_hedge(usdc_amount_micro: int, toUsd: bool) -> Dict[str, A
     }
 
 async def on_swap_event(ev: Dict[str, Any]) -> None:
-    """
-    Interpretation:
-      +delta: pool gained USDC => users sold PURR => hedge by buying PURR (toUsd=False)
-      -delta: pool lost USDC  => users bought PURR => hedge by selling PURR (toUsd=True)
-    """
     global last_hedge_ms
 
     delta = int(ev["usdcDelta"])
@@ -308,7 +283,6 @@ async def on_swap_event(ev: Dict[str, Any]) -> None:
     if amt_micro < MIN_HEDGE_USDC_MICRO:
         return
 
-    # cooldown + single-flight hedge
     async with hedge_lock:
         now = now_ms()
         if now - last_hedge_ms < HEDGE_COOLDOWN_MS:
@@ -324,22 +298,43 @@ async def on_swap_event(ev: Dict[str, Any]) -> None:
 # -----------------------------
 # EVM WS: Swap logs listener (single pool)
 # -----------------------------
+async def heartbeat_loop() -> None:
+    while True:
+        print(f"[heartbeat] alive clients={len(CLIENTS)} events={len(EVENTS)}", flush=True)
+        await asyncio.sleep(10)
+
 async def evm_swap_listener_loop() -> None:
     while True:
         try:
+            print("[evm_swap_listener] connecting...", flush=True)
             async with websockets.connect(ALCHEMY_WSS_URL, ping_interval=20, ping_timeout=20) as ws:
-                params = {"address": [WATCH_POOL], "topics": [SWAP_TOPIC0]}
-                await ws.send(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe", "params": ["logs", params]}))
-                resp = json.loads(await ws.recv())
+                # ✅ FIX: address must be a string for many providers (not a list)
+                params = {"address": WATCH_POOL, "topics": [SWAP_TOPIC0]}
+                req = {"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe", "params": ["logs", params]}
+
+                print("[evm_swap_listener] subscribe req:", json.dumps(req), flush=True)
+                await ws.send(json.dumps(req))
+
+                resp_raw = await ws.recv()
+                print("[evm_swap_listener] subscribe resp_raw:", resp_raw, flush=True)
+
+                resp = json.loads(resp_raw)
                 if "error" in resp:
                     raise RuntimeError(resp["error"])
+
                 sub_id = resp.get("result")
-                print(f"[evm_swap_listener] subscribed: {sub_id} pool={WATCH_POOL}")
+                print(f"[evm_swap_listener] subscribed: {sub_id} pool={WATCH_POOL}", flush=True)
 
                 async for raw in ws:
-                    msg = json.loads(raw)
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        print("[evm_swap_listener] bad json:", raw[:200], flush=True)
+                        continue
+
                     if msg.get("method") != "eth_subscription":
                         continue
+
                     payload = msg.get("params", {}).get("result")
                     if not payload:
                         continue
@@ -347,6 +342,7 @@ async def evm_swap_listener_loop() -> None:
                     try:
                         ev = decode_swap_log(payload)
                     except Exception:
+                        print("[decode_swap_log] failed:\n", traceback.format_exc(), flush=True)
                         continue
 
                     async with state_lock:
@@ -355,41 +351,53 @@ async def evm_swap_listener_loop() -> None:
                             del EVENTS[: len(EVENTS) - MAX_EVENTS_STORED]
 
                     await broadcast({"type": "swap", "data": ev})
+
                     if ENABLE_HL_TRADING:
                         asyncio.create_task(on_swap_event(ev))
 
+        except asyncio.CancelledError:
+            print("[evm_swap_listener] cancelled", flush=True)
+            raise
         except Exception as e:
-            print(f"[evm_swap_listener] error: {e} — reconnecting...")
+            print(f"[evm_swap_listener] error: {e} — reconnecting...", flush=True)
+            print(traceback.format_exc(), flush=True)
             await asyncio.sleep(2.0)
 
 # -----------------------------
-# API
+# API + Lifespan
 # -----------------------------
 from contextlib import asynccontextmanager
 
 listener_task: Optional[asyncio.Task] = None
+heartbeat_task: Optional[asyncio.Task] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global listener_task
+    global listener_task, heartbeat_task
+
+    print("[lifespan] startup begin", flush=True)
 
     if ENABLE_HL_TRADING:
         await init_market_decimals()
-        print(f"[startup] hedging enabled. szDecimals={purr_sz_decimals}, hlAccount={os.getenv('HL_ACCOUNT_ADDRESS')}")
+        print(f"[startup] hedging enabled. szDecimals={purr_sz_decimals}, hlAccount={os.getenv('HL_ACCOUNT_ADDRESS')}", flush=True)
 
-    listener_task = asyncio.create_task(evm_swap_listener_loop())
-    print("Started: EVM swap listener")
+    listener_task = asyncio.create_task(evm_swap_listener_loop(), name="evm_swap_listener")
+    heartbeat_task = asyncio.create_task(heartbeat_loop(), name="heartbeat")
+
+    print("Started: EVM swap listener", flush=True)
 
     try:
         yield
     finally:
-        # Best-effort shutdown
-        if listener_task:
-            listener_task.cancel()
-            try:
-                await listener_task
-            except asyncio.CancelledError:
-                pass
+        print("[lifespan] shutdown begin", flush=True)
+        for t in [listener_task, heartbeat_task]:
+            if t:
+                t.cancel()
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    pass
+        print("[lifespan] shutdown complete", flush=True)
 
 app = FastAPI(
     title="Swap Listener + HL Hedge (PURR/USDC)",
@@ -428,3 +436,7 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         CLIENTS.discard(ws)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="debug")

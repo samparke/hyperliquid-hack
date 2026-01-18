@@ -7,15 +7,11 @@ import "forge-std/console2.sol";
 import {SovereignPool} from "../src/SovereignPool.sol";
 import {SovereignALM} from "../src/SovereignALM.sol";
 import {SovereignVault} from "../src/SovereignVault.sol";
-import {BalanceSeekingSwapFeeModule} from "../src/SwapFeeModule.sol";
 import {SovereignPoolConstructorArgs} from "../src/structs/SovereignPoolStructs.sol";
 
-interface ISovereignVaultAuthorizer {
-    function setAuthorizedPool(address pool, bool ok) external;
-}
+// IMPORTANT: update path + name to match your repo
+import {BalanceSeekingSwapFeeModuleV3} from "../src/SwapFeeModuleV3.sol";
 
-// NOTE: add this function to SovereignVault.sol:
-// function approveAgent(address agent, string calldata name) external onlyStrategist { CoreWriterLib.approveAgent(agent, name); }
 interface ISovereignVaultAgentApprover {
     function approveAgent(address agent, string calldata name) external;
 }
@@ -25,7 +21,7 @@ contract DeployAll is Script {
         uint256 pk;
         address deployer;
 
-        // agent wallet that signs HL orders (private key lives in .env for your python server)
+        // HL agent wallet private key (python server / API wallet)
         uint256 hlAgentPk;
         address hlAgentAddr;
         string hlAgentName;
@@ -33,12 +29,11 @@ contract DeployAll is Script {
         address purr;
         address usdc;
 
-        // always deploy a NEW vault (ignore env)
+        // optional / can be 0
         address protocolFactory;
         address verifierModule;
 
         address poolManager;
-
         uint256 defaultSwapFeeBips;
 
         // fee module specifics
@@ -49,8 +44,13 @@ contract DeployAll is Script {
         uint256 minFeeBips;
         uint256 maxFeeBips;
         uint256 deadzoneImbalanceBips;
-        uint256 penaltySlopeBipsPerPct;
-        uint256 discountSlopeBipsPerPct;
+
+        // V2 units: "fee bips per 1 share-bps of imbalance move"
+        uint256 penaltySlopeBipsPerShareBps;
+        uint256 discountSlopeBipsPerShareBps;
+
+        // liquidity sanity buffer (bps). e.g. 50 = 0.50%
+        uint256 liquidityBufferBps;
     }
 
     function run() external {
@@ -70,8 +70,10 @@ contract DeployAll is Script {
         console2.log("Deployed SovereignVault:", address(vault));
 
         // 0.1) Approve HL agent wallet to trade the VAULT's Core balances
-        //      Requires SovereignVault.approveAgent(...) to be implemented (see note above).
-        ISovereignVaultAgentApprover(address(vault)).approveAgent(p.hlAgentAddr, p.hlAgentName);
+        ISovereignVaultAgentApprover(address(vault)).approveAgent(
+            p.hlAgentAddr,
+            p.hlAgentName
+        );
         console2.log("Vault approved HL agent:", p.hlAgentAddr);
 
         // 1) Deploy pool in external-vault mode
@@ -82,14 +84,15 @@ contract DeployAll is Script {
         vault.setAuthorizedPool(address(pool), true);
         console2.log("Vault authorized pool");
 
-        // 3) Deploy modules
+        // 3) Deploy ALM
         SovereignALM alm = new SovereignALM(address(pool));
         console2.log("Deployed SovereignALM:", address(alm));
 
-        BalanceSeekingSwapFeeModule feeModule = _deployFeeModule(p, pool);
-        console2.log("Deployed SwapFeeModule:", address(feeModule));
+        // 4) Deploy fee module (12 args)
+        BalanceSeekingSwapFeeModuleV3 feeModule = _deployFeeModule(p, pool);
+        console2.log("Deployed SwapFeeModuleV3:", address(feeModule));
 
-        // 4) Wire pool -> modules
+        // 5) Wire pool -> modules
         pool.setALM(address(alm));
         pool.setSwapFeeModule(address(feeModule));
 
@@ -109,8 +112,7 @@ contract DeployAll is Script {
         p.pk = vm.envUint("PRIVATE_KEY");
         p.deployer = vm.addr(p.pk);
 
-        // HL agent wallet private key (the one your python server will use as HL_SECRET_KEY)
-        // Put this in .env as HL_AGENT_PRIVATE_KEY
+        // HL agent wallet private key (the one your python server will use)
         p.hlAgentPk = vm.envUint("HL_AGENT_PRIVATE_KEY");
         p.hlAgentAddr = vm.addr(p.hlAgentPk);
         p.hlAgentName = vm.envOr("HL_AGENT_NAME", string("hedge-bot"));
@@ -120,8 +122,8 @@ contract DeployAll is Script {
         p.usdc = vm.envAddress("USDC");
 
         // optional / can be 0
-        p.protocolFactory = vm.envAddress("PROTOCOL_FACTORY");
-        p.verifierModule = vm.envAddress("VERIFIER_MODULE");
+        p.protocolFactory = vm.envOr("PROTOCOL_FACTORY", address(0));
+        p.verifierModule = vm.envOr("VERIFIER_MODULE", address(0));
 
         // pool config
         p.poolManager = vm.envAddress("POOL_MANAGER");
@@ -135,24 +137,38 @@ contract DeployAll is Script {
         p.minFeeBips = vm.envUint("MIN_FEE_BIPS");
         p.maxFeeBips = vm.envUint("MAX_FEE_BIPS");
         p.deadzoneImbalanceBips = vm.envUint("DEADZONE_IMBALANCE_BIPS");
-        p.penaltySlopeBipsPerPct = vm.envUint("PENALTY_SLOPE_BIPS_PER_PCT");
-        p.discountSlopeBipsPerPct = vm.envUint("DISCOUNT_SLOPE_BIPS_PER_PCT");
 
+        // slopes (share-bps based)
+        p.penaltySlopeBipsPerShareBps = vm.envUint("PENALTY_SLOPE_BIPS_PER_SHARE_BPS");
+        p.discountSlopeBipsPerShareBps = vm.envUint("DISCOUNT_SLOPE_BIPS_PER_SHARE_BPS");
+
+        // liquidity buffer
+        p.liquidityBufferBps = vm.envUint("LIQUIDITY_BUFFER_BPS");
+
+        // sanity
         require(p.purr != address(0) && p.usdc != address(0), "TOKENS_0");
         require(p.poolManager != address(0), "PM_0");
         require(p.defaultSwapFeeBips <= 10_000, "SWAP_FEE_TOO_HIGH");
-        require(p.minFeeBips <= p.maxFeeBips, "MIN_GT_MAX");
+
+        require(p.minFeeBips <= p.baseFeeBips, "MIN_GT_BASE");
+        require(p.baseFeeBips <= p.maxFeeBips, "BASE_GT_MAX");
+        require(p.maxFeeBips <= 10_000, "MAX_GT_100PCT");
+
         require(p.hlAgentAddr != address(0), "HL_AGENT_0");
+        require(p.liquidityBufferBps <= 5_000, "BUF_TOO_HIGH");
     }
 
-    function _deployPool(Params memory p, address vaultAddr) internal returns (SovereignPool pool) {
+    function _deployPool(Params memory p, address vaultAddr)
+        internal
+        returns (SovereignPool pool)
+    {
         SovereignPoolConstructorArgs memory args = SovereignPoolConstructorArgs({
             token0: p.purr,
             token1: p.usdc,
             sovereignVault: vaultAddr,
-            protocolFactory: p.protocolFactory, // can be 0
+            protocolFactory: p.protocolFactory,
             poolManager: p.poolManager,
-            verifierModule: p.verifierModule,   // can be 0
+            verifierModule: p.verifierModule,
             defaultSwapFeeBips: p.defaultSwapFeeBips,
             isToken0Rebase: false,
             isToken1Rebase: false,
@@ -165,9 +181,13 @@ contract DeployAll is Script {
 
     function _deployFeeModule(Params memory p, SovereignPool pool)
         internal
-        returns (BalanceSeekingSwapFeeModule feeModule)
+        returns (BalanceSeekingSwapFeeModuleV3 feeModule)
     {
-        feeModule = new BalanceSeekingSwapFeeModule(
+        // 12 args EXACTLY:
+        // (pool, usdc, purr, spotIndexPURR, invertPurrPx,
+        //  baseFeeBips, minFeeBips, maxFeeBips, deadzoneImbalanceBips,
+        //  penaltySlopeBipsPerShareBps, discountSlopeBipsPerShareBps, liquidityBufferBps)
+        feeModule = new BalanceSeekingSwapFeeModuleV3(
             address(pool),
             p.usdc,
             p.purr,
@@ -177,8 +197,9 @@ contract DeployAll is Script {
             p.minFeeBips,
             p.maxFeeBips,
             p.deadzoneImbalanceBips,
-            p.penaltySlopeBipsPerPct,
-            p.discountSlopeBipsPerPct
+            p.penaltySlopeBipsPerShareBps,
+            p.discountSlopeBipsPerShareBps,
+            p.liquidityBufferBps
         );
     }
 }
