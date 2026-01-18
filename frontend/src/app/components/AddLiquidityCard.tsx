@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import {
   useAccount,
   useReadContract,
@@ -301,7 +301,7 @@ export default function AddLiquidityCard() {
   const buttonState = getButtonState();
 
   return (
-    <div className="w-full max-w-[480px] mx-auto">
+    <div className="w-full">
       <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-4 shadow-lg glow-green">
         <h2 className="text-lg font-semibold text-[var(--foreground)] mb-4">
           Add Liquidity

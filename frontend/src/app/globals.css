@@ -10,7 +10,7 @@
   --accent: #22c55e;
   --accent-hover: #16a34a;
   --accent-muted: rgba(34, 197, 94, 0.15);
-  --text-muted: rgb(6, 6, 6);
+  --text-muted: #9bd59b; /* FIXED */
   --text-secondary: #66aa66;
   --danger: #ef4444;
   --success: #22c55e;
@@ -19,14 +19,17 @@
   --button-primary-hover: #1f5d1f;
 }
 
-* {
+/* ✅ SAFE reset */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-  padding: 0;
-  margin: 0;
 }
 
 html,
 body {
+  margin: 0;
+  padding: 0;
   max-width: 100vw;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -49,6 +52,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 input[type="number"] {
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 

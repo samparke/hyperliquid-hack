@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useAccount,
   useReadContract,
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
-import { parseUnits, formatUnits } from "viem";
-import { ArrowDown, Loader2, Settings, ChevronDown } from "lucide-react";
+import { formatUnits, parseUnits } from "viem";
+import { ArrowDown, ChevronDown, Loader2, Settings } from "lucide-react";
 
 // ═══════════════════════════════════════════════════════════════
 // Contract Addresses - Hyperliquid Testnet
@@ -95,7 +95,7 @@ const poolAbi = [
 ] as const;
 
 // ═══════════════════════════════════════════════════════════════
-// Token Input Component
+// Token Input Component (UI consistency pass)
 // ═══════════════════════════════════════════════════════════════
 function TokenInput({
   label,
@@ -115,16 +115,20 @@ function TokenInput({
   onMaxClick?: () => void;
 }) {
   return (
-    <div className="rounded-2xl bg-[var(--card)] border border-[var(--border)] p-4">
-      <div className="flex justify-between text-sm text-[var(--text-muted)] mb-2">
-        <span>{label}</span>
+    <div className="rounded-3xl bg-[var(--input-bg)] border border-[var(--border)] p-4 sm:p-5">
+      {/* top row */}
+      <div className="flex items-center justify-between gap-3 text-xs sm:text-sm text-[var(--text-muted)]">
+        <span className="leading-none">{label}</span>
+
         {balance && (
-          <span className="flex items-center gap-1">
-            Balance: {balance}
+          <span className="flex items-center gap-2 leading-none">
+            <span className="whitespace-nowrap">Balance: {balance}</span>
             {onMaxClick && (
               <button
+                type="button"
                 onClick={onMaxClick}
-                className="text-[var(--accent)] font-medium hover:text-[var(--accent-hover)] ml-1"
+                className="text-[var(--accent)] font-semibold hover:text-[var(--accent-hover)]"
+                aria-label="Use max balance"
               >
                 MAX
               </button>
@@ -132,7 +136,9 @@ function TokenInput({
           </span>
         )}
       </div>
-      <div className="flex items-center gap-3">
+
+      {/* main row */}
+      <div className="mt-3 flex items-center gap-3">
         <input
           type="text"
           value={amount}
@@ -141,13 +147,19 @@ function TokenInput({
           }
           placeholder="0"
           readOnly={readOnly}
-          className="bg-transparent text-3xl font-medium text-[var(--foreground)] placeholder-[var(--text-secondary)] outline-none flex-1 min-w-0"
+          className="min-w-0 bg-transparent w-full text-3xl sm:text-4xl font-semibold text-[var(--foreground)] placeholder-[var(--text-secondary)] outline-none leading-none"
+          inputMode="decimal"
         />
-        <button className="flex items-center gap-2 bg-[var(--input-bg)] px-3 py-2 rounded-xl font-medium text-[var(--foreground)] hover:bg-[var(--card-hover)] border border-[var(--border)]">
-          <div className="w-6 h-6 rounded-full bg-[var(--accent-muted)] flex items-center justify-center text-xs font-bold text-[var(--accent)]">
+
+        <button
+          type="button"
+          className="shrink-0 inline-flex items-center gap-2 h-11 px-3 rounded-2xl font-semibold text-[var(--foreground)] bg-[var(--card)] hover:bg-[var(--card-hover)] border border-[var(--border)]"
+          aria-label={`Select ${token.symbol}`}
+        >
+          <div className="w-7 h-7 rounded-full bg-[var(--accent-muted)] flex items-center justify-center text-xs font-bold text-[var(--accent)]">
             {token.symbol[0]}
           </div>
-          {token.symbol}
+          <span className="text-sm sm:text-base">{token.symbol}</span>
           <ChevronDown size={16} className="text-[var(--text-muted)]" />
         </button>
       </div>
@@ -156,7 +168,7 @@ function TokenInput({
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Main Swap Card
+// Main Swap Card (layout/padding/consistency pass)
 // ═══════════════════════════════════════════════════════════════
 export default function SwapCard() {
   const { address, isConnected } = useAccount();
@@ -182,7 +194,7 @@ export default function SwapCard() {
     }
   }, [amountIn, tokenIn.decimals]);
 
-  // Get token balance using useReadContract
+  // Get balance
   const { data: balanceRaw } = useReadContract({
     address: tokenIn.address,
     abi: [
@@ -217,51 +229,39 @@ export default function SwapCard() {
     return allowance < amountInParsed;
   }, [amountInParsed, allowance]);
 
-  // Contract writes
+  // Writes + receipt
   const { writeContractAsync, isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
     hash: txHash,
   });
-
   const isLoading = isPending || isConfirming;
 
-  // Estimate output (simplified - in production call ALM.getLiquidityQuote)
+  // Mock quote
   useEffect(() => {
     if (!amountIn || Number(amountIn) === 0) {
       setAmountOut("");
       return;
     }
 
-    // Mock price: 1 PURR = ~$4.70
     const purrPrice = 4.7;
     const inputAmount = Number(amountIn);
 
-    if (sellToken === "PURR") {
-      // PURR -> USDC
-      const output = inputAmount * purrPrice * 0.997; // 0.3% fee
-      setAmountOut(output.toFixed(6));
-    } else {
-      // USDC -> PURR
-      const output = (inputAmount / purrPrice) * 0.997;
-      setAmountOut(output.toFixed(5));
-    }
+    if (sellToken === "PURR")
+      setAmountOut((inputAmount * purrPrice * 0.997).toFixed(6));
+    else setAmountOut(((inputAmount / purrPrice) * 0.997).toFixed(5));
   }, [amountIn, sellToken]);
 
-  // Flip tokens
+  // Actions
   const handleFlip = () => {
     setSellToken(buyToken);
     setAmountIn(amountOut);
     setAmountOut(amountIn);
   };
 
-  // Max button
   const handleMax = () => {
-    if (balance) {
-      setAmountIn(balance);
-    }
+    if (balance) setAmountIn(balance);
   };
 
-  // Approve
   const handleApprove = async () => {
     if (!address || !amountInParsed) return;
     try {
@@ -277,12 +277,11 @@ export default function SwapCard() {
     }
   };
 
-  // Swap
   const handleSwap = async () => {
     if (!address || !amountInParsed) return;
 
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 20);
-    const slippageBps = Number(slippage) * 100;
+    const slippageBps = Math.floor(Number(slippage) * 100);
     const minOut = amountOut
       ? (BigInt(Math.floor(Number(amountOut) * 10 ** tokenOut.decimals)) *
           BigInt(10000 - slippageBps)) /
@@ -319,7 +318,7 @@ export default function SwapCard() {
   };
 
   // Button state
-  const getButtonState = () => {
+  const buttonState = (() => {
     if (!isConnected) return { text: "Connect Wallet", disabled: true };
     if (!amountIn || Number(amountIn) === 0)
       return { text: "Enter amount", disabled: true };
@@ -333,39 +332,41 @@ export default function SwapCard() {
         action: handleApprove,
       };
     return { text: "Swap", disabled: false, action: handleSwap };
-  };
-
-  const buttonState = getButtonState();
+  })();
 
   return (
-    <div className="w-full max-w-[700px] mx-auto">
-      {/* Card */}
-      <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] shadow-lg glow-green ">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+    <div className="w-full">
+      <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] shadow-lg glow-green p-4 sm:p-6 flex flex-col">
+        {/* header */}
+        <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-[var(--foreground)]">
             Swap
           </h2>
+
           <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="p-2 rounded-xl hover:bg-[var(--card-hover)] text-[var(--text-muted)]"
+            type="button"
+            onClick={() => setShowSettings((v) => !v)}
+            className="p-2.5 rounded-xl hover:bg-[var(--card-hover)] text-[var(--text-muted)] transition"
+            aria-label="Swap settings"
           >
             <Settings size={20} />
           </button>
         </div>
 
-        {/* Settings dropdown */}
+        {/* settings */}
         {showSettings && (
-          <div className="mb-4 p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--border)]">
-            <div className="text-sm text-[var(--text-muted)] mb-2">
+          <div className="mt-4 rounded-2xl bg-[var(--accent-muted)] border border-[var(--border)] p-4">
+            <div className="text-sm text-[var(--text-muted)] mb-3">
               Slippage Tolerance
             </div>
-            <div className="flex gap-2">
+
+            <div className="flex flex-wrap gap-2">
               {["0.1", "0.5", "1.0"].map((val) => (
                 <button
                   key={val}
+                  type="button"
                   onClick={() => setSlippage(val)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                  className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition ${
                     slippage === val
                       ? "bg-[var(--accent)] text-white"
                       : "bg-[var(--input-bg)] border border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--border-hover)]"
@@ -374,96 +375,112 @@ export default function SwapCard() {
                   {val}%
                 </button>
               ))}
+
               <input
                 type="text"
                 value={slippage}
                 onChange={(e) =>
                   setSlippage(e.target.value.replace(/[^0-9.]/g, ""))
                 }
-                className="w-16 px-2 py-1.5 rounded-lg text-sm border border-[var(--border)] text-center bg-[var(--input-bg)] text-[var(--foreground)]"
+                className="w-20 px-2 py-1.5 rounded-xl text-sm border border-[var(--border)] text-center bg-[var(--input-bg)] text-[var(--foreground)] outline-none"
                 placeholder="Custom"
+                inputMode="decimal"
               />
             </div>
           </div>
         )}
 
-        {/* Sell */}
-        <TokenInput
-          label="Sell"
-          token={tokenIn}
-          amount={amountIn}
-          onAmountChange={setAmountIn}
-          balance={balance}
-          onMaxClick={handleMax}
-        />
+        {/* body */}
+        <div className="mt-5">
+          {/* Inputs wrapper (allows clean flip placement without negative margins) */}
+          <div className="relative space-y-3">
+            <TokenInput
+              label="Sell"
+              token={tokenIn}
+              amount={amountIn}
+              onAmountChange={setAmountIn}
+              balance={balance}
+              onMaxClick={handleMax}
+            />
 
-        {/* Flip button */}
-        <div className="flex justify-center -my-2 relative z-10">
-          <button
-            onClick={handleFlip}
-            className="bg-[var(--card)] p-2 rounded-xl border border-[var(--border)] hover:border-[var(--border-hover)] hover:bg-[var(--card-hover)] transition"
-          >
-            <ArrowDown size={20} className="text-[var(--accent)]" />
-          </button>
+            {/* flip button */}
+            <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+              <button
+                type="button"
+                onClick={handleFlip}
+                className="pointer-events-auto bg-[var(--card)] p-2.5 rounded-2xl border border-[var(--border)] hover:border-[var(--border-hover)] hover:bg-[var(--card-hover)] transition shadow-sm"
+                aria-label="Flip tokens"
+              >
+                <ArrowDown size={20} className="text-[var(--accent)]" />
+              </button>
+            </div>
+
+            <TokenInput
+              label="Buy"
+              token={tokenOut}
+              amount={amountOut}
+              readOnly
+            />
+          </div>
         </div>
 
-        {/* Buy */}
-        <TokenInput label="Buy" token={tokenOut} amount={amountOut} readOnly />
-
-        {/* Price info */}
+        {/* details */}
         {amountIn && amountOut && Number(amountOut) > 0 && (
-          <div className="mt-4 p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--border)] text-sm">
-            <div className="flex justify-between text-[var(--text-muted)]">
+          <div className="mt-4 rounded-2xl bg-[var(--accent-muted)] border border-[var(--border)] p-4 text-sm">
+            <div className="flex items-center justify-between gap-3 text-[var(--text-muted)]">
               <span>Rate</span>
-              <span className="text-[var(--foreground)]">
+              <span className="text-[var(--foreground)] text-right">
                 1 {tokenIn.symbol} ={" "}
                 {(Number(amountOut) / Number(amountIn)).toFixed(6)}{" "}
                 {tokenOut.symbol}
               </span>
             </div>
-            <div className="flex justify-between text-[var(--text-muted)] mt-1">
+
+            <div className="flex items-center justify-between gap-3 text-[var(--text-muted)] mt-2">
               <span>Fee</span>
               <span className="text-[var(--foreground)]">0.3%</span>
             </div>
-            <div className="flex justify-between text-[var(--text-muted)] mt-1">
+
+            <div className="flex items-center justify-between gap-3 text-[var(--text-muted)] mt-2">
               <span>Slippage</span>
               <span className="text-[var(--foreground)]">{slippage}%</span>
             </div>
           </div>
         )}
 
-        {/* Action button */}
-        <button
-          onClick={buttonState.action}
-          disabled={buttonState.disabled}
-          className={`w-full mt-4 py-4 rounded-2xl font-semibold text-lg transition ${
-            buttonState.disabled
-              ? "bg-[var(--input-bg)] text-[var(--text-secondary)] cursor-not-allowed"
-              : "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] glow-green-strong"
-          }`}
-        >
-          <span className="flex items-center justify-center gap-2">
-            {isLoading && <Loader2 size={20} className="animate-spin" />}
-            {buttonState.text}
-          </span>
-        </button>
+        {/* CTA */}
+        <div className="mt-6">
+          <button
+            onClick={buttonState.action}
+            disabled={buttonState.disabled}
+            className={`w-full py-4 rounded-2xl font-semibold text-lg transition ${
+              buttonState.disabled
+                ? "bg-[var(--input-bg)] text-[var(--text-secondary)] cursor-not-allowed"
+                : "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] glow-green-strong"
+            }`}
+          >
+            <span className="flex items-center justify-center gap-2">
+              {isLoading && <Loader2 size={20} className="animate-spin" />}
+              {buttonState.text}
+            </span>
+          </button>
 
-        {/* Success message */}
-        {isSuccess && txHash && (
-          <div className="mt-4 p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--accent)] text-center">
-            <p className="text-[var(--accent)] text-sm">
-              Swap successful!{" "}
-              <a
-                href={`https://explorer.hyperliquid-testnet.xyz/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline font-medium"
-              >
-                View transaction
-              </a>
-            </p>
-          </div>
-        )}
+          {isSuccess && txHash && (
+            <div className="mt-4 rounded-2xl bg-[var(--accent-muted)] border border-[var(--accent)] p-4 text-center">
+              <p className="text-[var(--accent)] text-sm">
+                Swap successful!{" "}
+                <a
+                  href={`https://explorer.hyperliquid-testnet.xyz/tx/${txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-medium"
+                >
+                  View transaction
+                </a>
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

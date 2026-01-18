@@ -18,31 +18,35 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Tabs + Content */}
-        <div className="w-full">
-          <div className="flex gap-2 p-1 bg-[var(--card)] rounded-2xl border border-[var(--border)] mb-6 max-w-md mx-auto">
-            {["swap", "add", "remove"].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab as any)}
-                className={`flex-1 py-3 px-4 rounded-xl font-medium text-sm transition ${
-                  activeTab === tab
-                    ? "bg-[var(--accent)] text-white glow-green"
-                    : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
-                }`}
-              >
-                {tab === "swap"
-                  ? "Swap"
-                  : tab === "add"
-                    ? "Add Liquidity"
-                    : "Remove Liquidity"}
-              </button>
-            ))}
-          </div>
+        {/* Tabs + Content (shared width) */}
+        <div className="w-full flex justify-center">
+          <div className="w-full max-w-[500px]">
+            {/* Tabs */}
+            <div className="flex gap-2 p-1 bg-[var(--card)] rounded-2xl border border-[var(--border)] mb-6">
+              {(["swap", "add", "remove"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 py-3 px-4 rounded-xl font-medium text-sm transition ${
+                    activeTab === tab
+                      ? "bg-[var(--accent)] text-white glow-green"
+                      : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                  }`}
+                >
+                  {tab === "swap"
+                    ? "Swap"
+                    : tab === "add"
+                      ? "Add Liquidity"
+                      : "Remove Liquidity"}
+                </button>
+              ))}
+            </div>
 
-          {activeTab === "swap" && <SwapCard />}
-          {activeTab === "add" && <AddLiquidityCard />}
-          {activeTab === "remove" && <RemoveLiquidityCard />}
+            {/* Content */}
+            {activeTab === "swap" && <SwapCard />}
+            {activeTab === "add" && <AddLiquidityCard />}
+            {activeTab === "remove" && <RemoveLiquidityCard />}
+          </div>
         </div>
       </div>
     </main>
