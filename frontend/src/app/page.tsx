@@ -17,7 +17,8 @@ export default function Home() {
         {/* Hero */}
         <div className="text-center">
           <p className="text-[var(--text-muted)] text-lg sm:text-xl max-w-md mx-auto">
-            Swap tokens with yield-bearing liquidity on Hyperliquid
+            Swap tokens with yield-bearing liquidity on <b></b>
+            <i>Hyperliquid</i>
           </p>
         </div>
 
@@ -44,7 +45,7 @@ export default function Home() {
                       ? "Add"
                       : tab === "remove"
                         ? "Remove"
-                        : "Debug"}
+                        : "Strategist"}
                 </button>
               ))}
             </div>

@@ -35,19 +35,6 @@ function TokenInput({
     <div className="rounded-2xl bg-[var(--card)] border border-[var(--border)] p-4">
       <div className="flex justify-between text-sm text-[var(--text-muted)] mb-2">
         <span>{label}</span>
-        {balance && (
-          <span className="flex items-center gap-1">
-            Balance: {balance}
-            {onMaxClick && (
-              <button
-                onClick={onMaxClick}
-                className="text-[var(--accent)] font-medium hover:text-[var(--accent-hover)] ml-1"
-              >
-                MAX
-              </button>
-            )}
-          </span>
-        )}
       </div>
       <div className="flex items-center gap-3">
         <input
@@ -207,16 +194,6 @@ export default function RemoveLiquidityCard() {
           balance={balance1}
           onMaxClick={handleMax1}
         />
-
-        {/* Info */}
-        {(amount0 || amount1) && (
-          <div className="mt-4 p-3 rounded-xl bg-[var(--accent-muted)] border border-[var(--border)] text-sm">
-            <div className="flex justify-between text-[var(--text-muted)]">
-              <span>Share of Pool</span>
-              <span className="text-[var(--foreground)]">-</span>
-            </div>
-          </div>
-        )}
 
         {/* Action button */}
         <button

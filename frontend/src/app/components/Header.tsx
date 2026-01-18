@@ -9,20 +9,12 @@ export default function Header() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold text-[var(--foreground)]">
-              Sovereign
-            </span>
+            <img
+              src="/deltaFlow.png"
+              alt="Delta Flow"
+              className="h-7 sm:h-8 w-auto object-contain"
+            />
           </div>
-
-          {/* Navigation */}
-          <nav className="hidden md:flex items-center gap-20">
-            <a href="#" className="text-white font-medium text-sm">
-              Swap
-            </a>
-            <a href="#" className="text-white hover:gray text-sm transition">
-              Debug
-            </a>
-          </nav>
 
           {/* Connect button */}
           <ConnectButton

@@ -12,8 +12,7 @@ import { Plus, Loader2, ChevronDown } from "lucide-react";
 import { TOKENS, ERC20_ABI } from "@/contracts";
 
 // Vault address (recipient)
-const VAULT_ADDRESS =
-  "0x715EB367788e71C4c6aee4E8994aD407807fec27" as const;
+const VAULT_ADDRESS = "0x715EB367788e71C4c6aee4E8994aD407807fec27" as const;
 
 // ═══════════════════════════════════════════════════════════════
 // Token Input Component
@@ -201,7 +200,8 @@ export default function AddLiquidityCard() {
   };
 
   const buttonState = useMemo(() => {
-    if (!isConnected) return { text: "Connect Wallet", disabled: true as const };
+    if (!isConnected)
+      return { text: "Connect Wallet", disabled: true as const };
 
     const hasAny =
       (amount0 && Number(amount0) > 0) || (amount1 && Number(amount1) > 0);
@@ -222,9 +222,6 @@ export default function AddLiquidityCard() {
         <h2 className="text-lg font-semibold text-[var(--foreground)] mb-1">
           Deposit to Vault
         </h2>
-        <p className="text-xs text-[var(--text-muted)] mb-4 break-all">
-          Vault: <span className="text-[var(--foreground)]">{VAULT_ADDRESS}</span>
-        </p>
 
         {/* Token 0 */}
         <TokenInput

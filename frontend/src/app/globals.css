@@ -96,3 +96,7 @@ button:focus-visible {
 .glow-green-strong {
   box-shadow: 0 0 30px rgba(34, 197, 94, 0.25);
 }
+
+.font-manrope {
+  font-family: var(--font-manrope);
+}
