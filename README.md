@@ -45,13 +45,29 @@ The pool aims to maintain a 1:1 USDC value ratio:
 
 - the USDC value of token X reserves must equal the USDC value of token Y reserves.
 
-To further avoid deviations in pool balances, we apply a linearly increasing fee for every 0.01% deviation.
+To further avoid deviations in pool balances, we apply a linearly increasing fee for every 0.1% deviation.
 
 Target condition (healthy state):
 
 ```
 USDC/PURR * spot price
 ```
+
+## Delta Liquidity Hedging Operations
+
+This module is enabled by an API off-chain wallet which controlls the operations of the vault on spot and perpetual markets on HyperCore Exchange. 
+
+To protect and hedge against deviations in liquidity in our vault, we initiate spot orders to buy PURR tokens when there is excess USDC reserves and perpetual short orders to short PURR when there is excess PURR in the reserves. 
+
+This ensures the best price for our customers on their swaps as well as minimizes our downside for any offsets in our liquidity.
+
+This module operates on the same equation as the swap-fee:
+
+```
+USDC/PURR * spot price
+```
+
+This equation provides our liquidity pool with swap offers as close to the spot price as possible.
 
 ### Frontend
 
