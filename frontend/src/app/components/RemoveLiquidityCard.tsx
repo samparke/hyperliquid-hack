@@ -9,7 +9,7 @@ import {
 } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
 import { Minus, Loader2, ChevronDown } from "lucide-react";
-import { TOKENS, SOVEREIGN_POOL_ADDRESS } from "./SwapCard";
+import { TOKENS } from "./SwapCard";
 
 // ═══════════════════════════════════════════════════════════════
 // Token Input Component
@@ -80,7 +80,7 @@ export default function RemoveLiquidityCard() {
 
   const [amount0, setAmount0] = useState("");
   const [amount1, setAmount1] = useState("");
-  const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+  const [txHash, _setTxHash] = useState<`0x${string}` | undefined>();
 
   const token0 = TOKENS.PURR;
   const token1 = TOKENS.USDC;
@@ -146,7 +146,7 @@ export default function RemoveLiquidityCard() {
     : undefined;
 
   // Contract writes
-  const { writeContractAsync, isPending } = useWriteContract();
+  const { isPending } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
     hash: txHash,
   });
@@ -191,7 +191,7 @@ export default function RemoveLiquidityCard() {
   const buttonState = getButtonState();
 
   return (
-    <div className="w-full max-w-[480px] mx-auto">
+    <div className="w-full">
       <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-4 shadow-lg glow-green">
         <h2 className="text-lg font-semibold text-[var(--foreground)] mb-4">
           Remove Liquidity
