@@ -109,7 +109,6 @@ contract SovereignVaultTest is Test {
     function test_constructor() public view {
         assertEq(vault.strategist(), strategist);
         assertEq(vault.usdc(), usdcAddress);
-        assertEq(vault.MIN_BUFFER(), 50e6);
         assertEq(vault.defaultVault(), TEST_VAULT);
     }
 

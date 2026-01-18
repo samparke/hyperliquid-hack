@@ -6,7 +6,7 @@ import "forge-std/Script.sol";
 // --- Your contracts ---
 import {SovereignVault} from "../src/SovereignVault.sol";
 import {CapitalRouter} from "../src/CapitalRouter.sol";
-import {OrderbookModule} from "../src/DeltaBook.sol"; 
+import {OrderbookModule} from "../src/DeltaBook.sol";
 import {SovereignPool} from "../src/SovereignPool.sol";
 import {SovereignALM} from "../src/SovereignALM.sol";
 
@@ -19,8 +19,8 @@ import {SovereignPoolConstructorArgs} from "../src/structs/SovereignPoolStructs.
 
 contract DeployDeltaFlowTestnet is Script {
     // HyperEVM testnet token addresses you provided
-    address constant PURR = 0xc4bf3f870c0e9465323c0b6ed28096c2;
-    address constant USDC = 0x2B3370E50104a559b57D449569354196457DBAb;
+    address constant PURR = 0xa9056c15938f9aff34CD497c722Ce33dB0C2fD57;
+    address constant USDC = 0x2B3370eE501B4a559b57D449569354196457D8Ab;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -36,13 +36,18 @@ contract DeployDeltaFlowTestnet is Script {
 
         // 3) Deploy DeltaBook (OrderbookModule)
         // owner/strategist/guardian = deployer for testnet simplicity
-        OrderbookModule deltaBook = new OrderbookModule(
-            /*vault*/ vault,
-            /*token0*/ PURR,
-            /*token1*/ USDC,
-            /*owner*/ deployer,
-            /*strategist*/ deployer,
-            /*guardian*/ deployer
+        OrderbookModule deltaBook = new OrderbookModule( /*vault*/
+            vault,
+            /*token0*/
+            PURR,
+            /*token1*/
+            USDC,
+            /*owner*/
+            deployer,
+            /*strategist*/
+            deployer,
+            /*guardian*/
+            deployer
         );
 
         // Wire oracle into DeltaBook
@@ -54,13 +59,18 @@ contract DeployDeltaFlowTestnet is Script {
         deltaBook.setMarkets(spotMarketId, perpMarketId);
 
         // 4) Deploy CapitalRouter
-        CapitalRouter router = new CapitalRouter(
-            /*vault*/ vault,
-            /*token0*/ PURR,
-            /*token1*/ USDC,
-            /*owner*/ deployer,
-            /*strategist*/ deployer,
-            /*guardian*/ deployer
+        CapitalRouter router = new CapitalRouter( /*vault*/
+            vault,
+            /*token0*/
+            PURR,
+            /*token1*/
+            USDC,
+            /*owner*/
+            deployer,
+            /*strategist*/
+            deployer,
+            /*guardian*/
+            deployer
         );
 
         // Wire router into vault

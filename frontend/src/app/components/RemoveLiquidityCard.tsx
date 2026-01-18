@@ -9,7 +9,7 @@ import {
 } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
 import { Minus, Loader2, ChevronDown } from "lucide-react";
-import { TOKENS } from "./SwapCard";
+import { TOKENS, ERC20_ABI } from "@/contracts";
 
 // ═══════════════════════════════════════════════════════════════
 // Token Input Component
@@ -107,15 +107,7 @@ export default function RemoveLiquidityCard() {
   // Get token balances (user's liquidity position - placeholder)
   const { data: balance0Raw } = useReadContract({
     address: token0.address,
-    abi: [
-      {
-        name: "balanceOf",
-        type: "function",
-        stateMutability: "view",
-        inputs: [{ name: "account", type: "address" }],
-        outputs: [{ name: "", type: "uint256" }],
-      },
-    ] as const,
+    abi: ERC20_ABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address },
@@ -123,15 +115,7 @@ export default function RemoveLiquidityCard() {
 
   const { data: balance1Raw } = useReadContract({
     address: token1.address,
-    abi: [
-      {
-        name: "balanceOf",
-        type: "function",
-        stateMutability: "view",
-        inputs: [{ name: "account", type: "address" }],
-        outputs: [{ name: "", type: "uint256" }],
-      },
-    ] as const,
+    abi: ERC20_ABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address },

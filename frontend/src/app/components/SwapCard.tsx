@@ -9,90 +9,16 @@ import {
 } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
 import { ArrowDown, ChevronDown, Loader2, Settings } from "lucide-react";
+import {
+  ADDRESSES,
+  TOKENS,
+  ERC20_ABI,
+  SOVEREIGN_POOL_ABI,
+} from "@/contracts";
 
-// ═══════════════════════════════════════════════════════════════
-// Contract Addresses - Hyperliquid Testnet
-// ═══════════════════════════════════════════════════════════════
-export const SOVEREIGN_POOL_ADDRESS =
-  "0x0000000000000000000000000000000000000000" as const; // TODO: Deploy and update
-
-export const TOKENS = {
-  PURR: {
-    address: "0xa9056c15938f9aff34CD497c722Ce33dB0C2fD57" as const,
-    symbol: "PURR",
-    decimals: 5,
-    name: "PURR",
-  },
-  USDC: {
-    address: "0x5555555555555555555555555555555555555555" as const,
-    symbol: "USDC",
-    decimals: 6,
-    name: "USD Coin",
-  },
-} as const;
-
-// ═══════════════════════════════════════════════════════════════
-// ABIs
-// ═══════════════════════════════════════════════════════════════
-const erc20Abi = [
-  {
-    name: "allowance",
-    type: "function",
-    stateMutability: "view",
-    inputs: [
-      { name: "owner", type: "address" },
-      { name: "spender", type: "address" },
-    ],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    name: "approve",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "spender", type: "address" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-  },
-] as const;
-
-const poolAbi = [
-  {
-    name: "swap",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      {
-        name: "params",
-        type: "tuple",
-        components: [
-          { name: "isSwapCallback", type: "bool" },
-          { name: "isZeroToOne", type: "bool" },
-          { name: "amountIn", type: "uint256" },
-          { name: "amountOutMin", type: "uint256" },
-          { name: "deadline", type: "uint256" },
-          { name: "recipient", type: "address" },
-          { name: "swapTokenOut", type: "address" },
-          {
-            name: "swapContext",
-            type: "tuple",
-            components: [
-              { name: "externalContext", type: "bytes" },
-              { name: "verifierContext", type: "bytes" },
-              { name: "swapFeeModuleContext", type: "bytes" },
-              { name: "swapCallbackContext", type: "bytes" },
-            ],
-          },
-        ],
-      },
-    ],
-    outputs: [
-      { name: "amountInUsed", type: "uint256" },
-      { name: "amountOut", type: "uint256" },
-    ],
-  },
-] as const;
+// Re-export for other components
+export { TOKENS };
+export const SOVEREIGN_POOL_ADDRESS = ADDRESSES.POOL;
 
 // ═══════════════════════════════════════════════════════════════
 // Token Input Component (UI consistency pass)
@@ -218,7 +144,7 @@ export default function SwapCard() {
   // Get allowance
   const { data: allowance } = useReadContract({
     address: tokenIn.address,
-    abi: erc20Abi,
+    abi: ERC20_ABI,
     functionName: "allowance",
     args: address ? [address, SOVEREIGN_POOL_ADDRESS] : undefined,
     query: { enabled: !!address && amountInParsed > 0n },
@@ -267,7 +193,7 @@ export default function SwapCard() {
     try {
       const hash = await writeContractAsync({
         address: tokenIn.address,
-        abi: erc20Abi,
+        abi: ERC20_ABI,
         functionName: "approve",
         args: [SOVEREIGN_POOL_ADDRESS, amountInParsed],
       });
@@ -307,7 +233,7 @@ export default function SwapCard() {
     try {
       const hash = await writeContractAsync({
         address: SOVEREIGN_POOL_ADDRESS,
-        abi: poolAbi,
+        abi: SOVEREIGN_POOL_ABI,
         functionName: "swap",
         args: [params],
       });

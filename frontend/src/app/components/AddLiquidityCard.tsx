@@ -9,7 +9,7 @@ import {
 } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
 import { Plus, Loader2, ChevronDown } from "lucide-react";
-import { TOKENS, SOVEREIGN_POOL_ADDRESS } from "./SwapCard";
+import { ADDRESSES, TOKENS, ERC20_ABI } from "@/contracts";
 
 // ═══════════════════════════════════════════════════════════════
 // Token Input Component (reused from SwapCard)
@@ -104,15 +104,7 @@ export default function AddLiquidityCard() {
   // Get token balances
   const { data: balance0Raw } = useReadContract({
     address: token0.address,
-    abi: [
-      {
-        name: "balanceOf",
-        type: "function",
-        stateMutability: "view",
-        inputs: [{ name: "account", type: "address" }],
-        outputs: [{ name: "", type: "uint256" }],
-      },
-    ] as const,
+    abi: ERC20_ABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address },
@@ -120,15 +112,7 @@ export default function AddLiquidityCard() {
 
   const { data: balance1Raw } = useReadContract({
     address: token1.address,
-    abi: [
-      {
-        name: "balanceOf",
-        type: "function",
-        stateMutability: "view",
-        inputs: [{ name: "account", type: "address" }],
-        outputs: [{ name: "", type: "uint256" }],
-      },
-    ] as const,
+    abi: ERC20_ABI,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: !!address },
@@ -144,39 +128,17 @@ export default function AddLiquidityCard() {
   // Get allowances
   const { data: allowance0 } = useReadContract({
     address: token0.address,
-    abi: [
-      {
-        name: "allowance",
-        type: "function",
-        stateMutability: "view",
-        inputs: [
-          { name: "owner", type: "address" },
-          { name: "spender", type: "address" },
-        ],
-        outputs: [{ name: "", type: "uint256" }],
-      },
-    ] as const,
+    abi: ERC20_ABI,
     functionName: "allowance",
-    args: address ? [address, SOVEREIGN_POOL_ADDRESS] : undefined,
+    args: address ? [address, ADDRESSES.POOL] : undefined,
     query: { enabled: !!address && amount0Parsed > 0n },
   });
 
   const { data: allowance1 } = useReadContract({
     address: token1.address,
-    abi: [
-      {
-        name: "allowance",
-        type: "function",
-        stateMutability: "view",
-        inputs: [
-          { name: "owner", type: "address" },
-          { name: "spender", type: "address" },
-        ],
-        outputs: [{ name: "", type: "uint256" }],
-      },
-    ] as const,
+    abi: ERC20_ABI,
     functionName: "allowance",
-    args: address ? [address, SOVEREIGN_POOL_ADDRESS] : undefined,
+    args: address ? [address, ADDRESSES.POOL] : undefined,
     query: { enabled: !!address && amount1Parsed > 0n },
   });
 
@@ -203,20 +165,9 @@ export default function AddLiquidityCard() {
     try {
       const hash = await writeContractAsync({
         address: token0.address,
-        abi: [
-          {
-            name: "approve",
-            type: "function",
-            stateMutability: "nonpayable",
-            inputs: [
-              { name: "spender", type: "address" },
-              { name: "amount", type: "uint256" },
-            ],
-            outputs: [{ name: "", type: "bool" }],
-          },
-        ] as const,
+        abi: ERC20_ABI,
         functionName: "approve",
-        args: [SOVEREIGN_POOL_ADDRESS, amount0Parsed],
+        args: [ADDRESSES.POOL, amount0Parsed],
       });
       setTxHash(hash);
     } catch (err) {
@@ -230,20 +181,9 @@ export default function AddLiquidityCard() {
     try {
       const hash = await writeContractAsync({
         address: token1.address,
-        abi: [
-          {
-            name: "approve",
-            type: "function",
-            stateMutability: "nonpayable",
-            inputs: [
-              { name: "spender", type: "address" },
-              { name: "amount", type: "uint256" },
-            ],
-            outputs: [{ name: "", type: "bool" }],
-          },
-        ] as const,
+        abi: ERC20_ABI,
         functionName: "approve",
-        args: [SOVEREIGN_POOL_ADDRESS, amount1Parsed],
+        args: [ADDRESSES.POOL, amount1Parsed],
       });
       setTxHash(hash);
     } catch (err) {
