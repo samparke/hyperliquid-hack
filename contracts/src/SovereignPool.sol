@@ -657,6 +657,16 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
         nonReentrant
         returns (uint256 amountInUsed, uint256 amountOut)
     {
+        int256 usdcDelta = 0;
+        address vault = sovereignVault;
+
+        uint256 usdcBefore;
+        address usdcToken;
+
+        if (vault != address(this)) {
+            usdcToken = ISovereignVaultMinimal(vault).usdc();
+            usdcBefore = IERC20(usdcToken).balanceOf(vault);
+        }
         if (block.timestamp > _swapParams.deadline) {
             revert SovereignPool__swap_expired();
         }
@@ -691,7 +701,7 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
             // Query Verifier Module to authenticate the swap
             verifierData =
                 _verifyPermission(msg.sender, _swapParams.swapContext.verifierContext, uint8(AccessType.SWAP));
-        }
+        } 
 
         // Calculate swap fee in bips
 
@@ -790,6 +800,10 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
         // Transfer `amountOut to recipient
         _handleTokenOutTransferOnSwap(IERC20(_swapParams.swapTokenOut), _swapParams.recipient, amountOut);
 
+        if (vault != address(this)) {
+            uint256 usdcAfter = IERC20(usdcToken).balanceOf(vault);
+            usdcDelta = int256(usdcAfter) - int256(usdcBefore);
+        }
         // Update state for Swap fee module,
         // only performed if internalContext is non-empty
         if (
@@ -804,9 +818,9 @@ contract SovereignPool is ISovereignPool, ReentrancyGuard {
             ISovereignALM(alm).onSwapCallback(_swapParams.isZeroToOne, amountInUsed, amountOut);
         }
 
-        uint256 balance = ISovereignVaultMinimal(sovereignVault).getUSDCBalance();
+       
 
-        emit Swap(msg.sender, _swapParams.isZeroToOne, amountInUsed, effectiveFee, amountOut, balance);
+        emit Swap(msg.sender, _swapParams.isZeroToOne, amountInUsed, effectiveFee, amountOut, usdcDelta);
     }
 
     /**

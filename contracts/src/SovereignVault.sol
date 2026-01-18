@@ -32,6 +32,10 @@ contract SovereignVault is ISovereignVaultMinimal {
         usdc = _usdc;
     }
 
+    function getUSDCBalance() external view returns (uint256) {
+        return IERC20(usdc).balanceOf(address(this));
+    }
+
     modifier onlyAuthorizedPool() {
         if (!authorizedPools[msg.sender]) revert OnlyAuthorizedPool();
         _;
@@ -107,33 +111,53 @@ contract SovereignVault is ISovereignVaultMinimal {
 
     // ============ VAULT ALLOCATION ============
 
-    /// @notice Allocate excess USDC to a HyperCore vault for yield
-    /// @param vault The vault address to deposit into
-    /// @param usdcAmount Amount of USDC to allocate (in EVM decimals, 6)
-    function allocate(address vault, uint256 usdcAmount) external onlyStrategist {
-        usdcBalance = IERC20(usdc).balanceOf(address(this));
+    event BridgedToCore(address indexed token, uint256 amount);
+    event BridgedToEvm(address indexed token, uint256 amount);
+    event CoreVaultMoved(address indexed coreVault, bool isDeposit, uint256 amount);
+
+    mapping(address => uint256) public allocatedToCoreVault;
+
+    /// @notice Bridge USDC from this EVM vault to Core (no vault transfer)
+    function bridgeToCoreOnly(uint256 usdcAmount) external onlyStrategist {
+        CoreWriterLib.bridgeToCore(usdc, usdcAmount);
+        emit BridgedToCore(usdc, usdcAmount);
+    }
+
+    /// @notice Bridge USDC to Core and deposit into a specific Core vault (yield/trading)
+    function allocate(address coreVault, uint256 usdcAmount) external onlyStrategist {
+        CoreWriterLib.bridgeToCore(usdc, usdcAmount);
+        CoreWriterLib.vaultTransfer(coreVault, true, _toU64(usdcAmount));
+
+        allocatedToCoreVault[coreVault] += usdcAmount;
         totalAllocatedUSDC += usdcAmount;
 
-        CoreWriterLib.bridgeToCore(usdc, usdcAmount);
-        CoreWriterLib.vaultTransfer(vault, true, _toU64(usdcAmount));
+        emit BridgedToCore(usdc, usdcAmount);
+        emit CoreVaultMoved(coreVault, true, usdcAmount);
     }
 
-    /// @notice Withdraw USDC from a HyperCore vault back to this contract
-    /// @param vault The vault address to withdraw from
-    /// @param usdcAmount Amount of USDC to deallocate (in EVM decimals, 6)
-    function deallocate(address vault, uint256 usdcAmount) external onlyStrategist {
-        CoreWriterLib.vaultTransfer(vault, false, _toU64(usdcAmount));
+    /// @notice Withdraw USDC from a specific Core vault back to this EVM vault
+    function deallocate(address coreVault, uint256 usdcAmount) external onlyStrategist {
+        CoreWriterLib.vaultTransfer(coreVault, false, _toU64(usdcAmount));
         CoreWriterLib.bridgeToEvm(usdc, usdcAmount);
-        usdcBalance = IERC20(usdc).balanceOf(address(this));
-        totalAllocatedUSDC -= usdcAmount;  
+
+        allocatedToCoreVault[coreVault] -= usdcAmount;
+        totalAllocatedUSDC -= usdcAmount;
+
+        emit CoreVaultMoved(coreVault, false, usdcAmount);
+        emit BridgedToEvm(usdc, usdcAmount);
     }
+
+    /// @notice Bridge USDC back from Core to EVM (no vault transfer)
+    ///         Assumes strategist has already moved funds out of Core vault(s) into the Core balance.
+    function bridgeToEvmOnly(uint256 usdcAmount) external onlyStrategist {
+        CoreWriterLib.bridgeToEvm(usdc, usdcAmount);
+        emit BridgedToEvm(usdc, usdcAmount);
+    }
+
+    
 
     function getTotalAllocatedUSDC() external view returns (uint256) {
         return totalAllocatedUSDC;
-    }
-    
-    function getUSDCBalance() external view returns (uint256) {
-        return usdcBalance;
     }
 
     function claimPoolManagerFees(uint256 _feePoolManager0, uint256 _feePoolManager1) external onlyAuthorizedPool {
