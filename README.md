@@ -11,11 +11,12 @@ Delta Flow brings a new class of AMMs to market that: prices swaps based on spot
 
 ![Delta Flow Logo](frontend/public/flow.png)
 
-## Delta Flow has three modules:
+## Delta Flow has four modules:
 
 - Delta Vault
 - Delta ALM
 - Delta Swap-Fee
+- Delta Liqudity Hedging Operator
 
 ## Delta Vault
 
