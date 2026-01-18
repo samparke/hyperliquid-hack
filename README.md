@@ -56,6 +56,62 @@ USDC/PURR * spot price
 ### Frontend
 
 ```bash
-cd frontend
+pnpm install
 pnpm dev
 ```
+
+### How to deploy
+
+## Setting up .env (for HyperLiquid testnet)
+
+```
+TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
+CHAIN_ID=998
+ALCHEMY_WS_URL= #needed for contract event listening
+STRATEGIST_EVM_PRIVATE_KEY=
+USDC=0x2B3370eE501b4a559b57D449569354196457D8Ab
+PURR=0xa9056c15938f9aff34cd497c722ce33db0c2fd57
+REBALANCE_BAND=0.015
+HL_AGENT_NAME=insert-name
+INVERT_PURR_PX=false
+ENABLE_HL_TRADING=true
+HL_SECRET_KEY=
+HL_ACCOUNT_ADDRESS=
+SOVEREIGN_VAULT_ADDRESS=
+WATCH_POOL=
+PROTOCOL_FACTORY=
+VERIFIER_MODULE=
+POOL_MANAGER=
+# Swap fee params
+DEFAULT_SWAP_FEE_BIPS=15
+
+# Fee module params
+BASE_FEE_BIPS=15
+MIN_FEE_BIPS=5
+MAX_FEE_BIPS=1000
+PENALTY_SLOPE_BIPS_PER_SHARE_BPS=1
+DISCOUNT_SLOPE_BIPS_PER_SHARE_BPS=1
+LIQUIDITY_BUFFER_BPS=50
+DEADZONE_IMBALANCE_BIPS=200
+PENALTY_SLOPE_BIPS_PER_PCT=5
+DISCOUNT_SLOPE_BIPS_PER_PCT=5
+```
+
+## Deployment
+
+```shell
+$ forge clean            
+$ forge build
+$ forge script contracts/script/DeployAll.s.sol:DeployAll  --rpc-url $TESTNET_RPC_URL  --broadcast -vvvv
+```
+
+## Backend Server
+
+```shell
+$ pip install dotenv asyncio fastapi web3 websockets
+$ python backend/server.py
+```
+
+### Live Demo:
+
+https://hyperliquid-hack-frontend.vercel.app/
