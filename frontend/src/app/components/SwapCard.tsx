@@ -326,7 +326,6 @@ export default function SwapCard() {
       staleTime: 0,
       gcTime: 0,
     },
-    // @ts-expect-error wagmi v2 supports scopeKey; remove if your version doesn't.
     scopeKey: `allowance-${sellToken}-${approvalNonce}`,
   });
 

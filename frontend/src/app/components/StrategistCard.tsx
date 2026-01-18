@@ -243,13 +243,13 @@ type SpotBalanceReturn =
 
 function pickSpotTotal(x: SpotBalanceReturn): bigint | undefined {
   if (!x) return undefined;
-  if (Array.isArray(x)) return x[0];
-  return x.total;
+  if ("total" in x) return x.total;
+  return x[0];
 }
 function pickSpotHold(x: SpotBalanceReturn): bigint | undefined {
   if (!x) return undefined;
-  if (Array.isArray(x)) return x[1];
-  return x.hold;
+  if ("hold" in x) return x.hold;
+  return x[1];
 }
 
 function safeFormatUnits(value: bigint | undefined, decimals: number): string {
@@ -571,18 +571,7 @@ export default function StrategistCard() {
   } = useReadContract({
     address: almAddress as `0x${string}`,
     abi: SOVEREIGN_ALM_ABI,
-    functionName: "getSpotPrice",
-    query: { enabled: isAlmDeployed },
-  });
-
-  const {
-    data: token0Info,
-    isLoading: loadingTokenInfo,
-    refetch: refetchTokenInfo,
-  } = useReadContract({
-    address: almAddress as `0x${string}`,
-    abi: SOVEREIGN_ALM_ABI,
-    functionName: "getToken0Info",
+    functionName: "getSpotPriceUSDCperPURR",
     query: { enabled: isAlmDeployed },
   });
 
@@ -737,7 +726,6 @@ export default function StrategistCard() {
 
     // ALM
     refetchSpot();
-    refetchTokenInfo();
     refetchAlmPool();
 
     // User
