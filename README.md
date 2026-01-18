@@ -1,6 +1,7 @@
 # Delta Flow
 
-[Live UI](https://hyperliquid-hack-frontend-h6kqohyup-samuel-parkes-projects.vercel.app/)
+### Live Demo:
+https://hyperliquid-hack-frontend.vercel.app/
 
 Delta Flow is a highly composable and precise AMM inspired by the Valantis Sovereign Pool architecture.
 
