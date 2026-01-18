@@ -1,0 +1,24 @@
+[profile.default]
+src = "contracts/src"
+out = "out"
+libs = ["contracts/lib", "lib"]
+test = "test"
+cache_path = "cache"
+solc = "0.8.30"
+optimizer = true
+optimizer_runs = 10
+via_ir = true
+bytecode_hash = "none"
+cbor_metadata = false
+
+# Exclude certora + mocks that cause missing file issues
+ignored_error_codes = []
+fs_permissions = [{ access = "read", path = "./" }]
+
+# IMPORTANT: ignore these directories
+skip = [
+  "contracts/lib/**/certora/**",
+  "contracts/lib/**/mocks/**",
+  "lib/**/certora/**",
+  "lib/**/mocks/**"
+]
