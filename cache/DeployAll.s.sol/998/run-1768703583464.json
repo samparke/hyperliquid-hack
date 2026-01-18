@@ -20,9 +20,6 @@
     },
     {
       "rpc": "https://rpc.hyperliquid-testnet.xyz/evm"
-    },
-    {
-      "rpc": "https://rpc.hyperliquid-testnet.xyz/evm"
     }
   ]
 }

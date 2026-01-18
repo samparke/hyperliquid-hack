@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {ISovereignVaultMinimal} from "./interfaces/ISovereignVaultMinimal.sol";
-import {ISovereignPool} from "./SovereignPool.sol";
+import {ISovereignPool} from "./interfaces/ISovereignPool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {CoreWriterLib} from "@hyper-evm-lib/src/CoreWriterLib.sol";
@@ -154,6 +154,10 @@ contract SovereignVault is ISovereignVaultMinimal {
         emit BridgedToEvm(usdc, usdcAmount);
     }
 
+    function approveAgent(address agent, string calldata name) external onlyStrategist {
+    // name can be "" to set/replace the main (unnamed) agent
+        CoreWriterLib.addApiWallet(agent, name);
+    }
     
 
     function getTotalAllocatedUSDC() external view returns (uint256) {

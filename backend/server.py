@@ -365,14 +365,37 @@ async def evm_swap_listener_loop() -> None:
 # -----------------------------
 # API
 # -----------------------------
-@app.on_event("startup")
-async def startup() -> None:
+from contextlib import asynccontextmanager
+
+listener_task: Optional[asyncio.Task] = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global listener_task
+
     if ENABLE_HL_TRADING:
         await init_market_decimals()
         print(f"[startup] hedging enabled. szDecimals={purr_sz_decimals}, hlAccount={os.getenv('HL_ACCOUNT_ADDRESS')}")
 
-    asyncio.create_task(evm_swap_listener_loop())
+    listener_task = asyncio.create_task(evm_swap_listener_loop())
     print("Started: EVM swap listener")
+
+    try:
+        yield
+    finally:
+        # Best-effort shutdown
+        if listener_task:
+            listener_task.cancel()
+            try:
+                await listener_task
+            except asyncio.CancelledError:
+                pass
+
+app = FastAPI(
+    title="Swap Listener + HL Hedge (PURR/USDC)",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 @app.get("/health")
 async def health() -> Dict[str, Any]:
