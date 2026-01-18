@@ -13,7 +13,7 @@ import { TOKENS, ERC20_ABI } from "@/contracts";
 
 // Vault address (recipient)
 const VAULT_ADDRESS =
-  "0xDFaAade487B32062D7Ea5c06fA480a822b325A80" as const;
+  "0x715EB367788e71C4c6aee4E8994aD407807fec27" as const;
 
 // ═══════════════════════════════════════════════════════════════
 // Token Input Component

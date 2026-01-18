@@ -9,88 +9,95 @@ import {
 } from "wagmi";
 import { formatUnits, parseUnits, maxUint256 } from "viem";
 import { ArrowDown, ChevronDown, Loader2, Settings } from "lucide-react";
-import { TOKENS, ERC20_ABI, SOVEREIGN_POOL_ABI } from "@/contracts";
+import { TOKENS, ERC20_ABI, SOVEREIGN_POOL_ABI, FEE_MODULE_ABI, SOVEREIGN_ALM_ABI, ADDRESSES } from "@/contracts";
 
 // Re-export for other components
 export { TOKENS };
 
 // Hard-set to your deployed pool
-export const SOVEREIGN_POOL_ADDRESS =
-  "0x5BaCa1C25D084873C6b9A4D437aC275027C2D94b" as const;
 
-// Your swap fee module (fallback if pool.swapFeeModule() is zero/unset)
+// Fallback fee module if pool.swapFeeModule() is zero
 const SWAP_FEE_MODULE_FALLBACK =
-  "0x4AAB075BCa61D7F8618CCab3af878F889892CBc6" as const;
+  "0xA0Fa62675a8Db6814510eEF716c67021F249a5d6" as const;
+
+// --- Debug ABIs ---
+const DECIMALS_ABI = [
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint8" }],
+  },
+] as const;
+
+const BALANCE_OF_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
+] as const;
+
+const ALM_SPOT_ABI = [
+  {
+    type: "function",
+    name: "getSpotPriceUSDCperPURR",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "pxUSDCperPURR", type: "uint256" }],
+  },
+] as const;
 
 // Minimal ABI for fee module quoting
-const SWAP_FEE_MODULE_ABI = [
-  {
-    type: "function",
-    name: "getSwapFeeInBips",
-    stateMutability: "view",
-    inputs: [
-      { name: "tokenIn", type: "address" },
-      { name: "tokenOut", type: "address" },
-      { name: "amountIn", type: "uint256" },
-      { name: "sender", type: "address" },
-      { name: "ctx", type: "bytes" },
-    ],
-    outputs: [
-      {
-        name: "data",
-        type: "tuple",
-        components: [
-          { name: "feeInBips", type: "uint256" },
-          { name: "internalContext", type: "bytes" },
-        ],
-      },
-    ],
-  },
-] as const;
 
-// Minimal ABI for ALM quoting
-// NOTE: Your ALM returns (isCallbackOnSwap, amountOut, amountInFilled)
-// Your previous ABI had a different order, which breaks parsing.
-const SOVEREIGN_ALM_ABI_MIN = [
-  {
-    type: "function",
-    name: "getLiquidityQuote",
-    stateMutability: "view",
-    inputs: [
-      {
-        name: "_almLiquidityQuoteInput",
-        type: "tuple",
-        components: [
-          { name: "isZeroToOne", type: "bool" },
-          { name: "amountInMinusFee", type: "uint256" },
-          { name: "feeInBips", type: "uint256" },
-          { name: "sender", type: "address" },
-          { name: "recipient", type: "address" },
-          { name: "tokenOutSwap", type: "address" },
-        ],
-      },
-      { name: "", type: "bytes" }, // externalContext
-      { name: "", type: "bytes" }, // verifierData (unused for you)
-    ],
-    outputs: [
-      {
-        name: "",
-        type: "tuple",
-        components: [
-          { name: "isCallbackOnSwap", type: "bool" },
-          { name: "amountOut", type: "uint256" },
-          { name: "amountInFilled", type: "uint256" },
-        ],
-      },
-    ],
-  },
-] as const;
 
 // amountInMinusFee exactly like pool:
 // amountInMinusFee = amountIn * 10000 / (10000 + feeBips)
 function amountInMinusFee(amountIn: bigint, feeBips: bigint): bigint {
   const BIPS = 10_000n;
   return (amountIn * BIPS) / (BIPS + feeBips);
+}
+
+// Helpers: parse viem return shapes safely
+function asBigint(v: any): bigint {
+  if (v == null) return 0n;
+  if (typeof v === "bigint") return v;
+  try {
+    return BigInt(v);
+  } catch {
+    return 0n;
+  }
+}
+
+function extractFeeBips(feeDataRaw: any): bigint {
+  // Most common: { feeInBips, internalContext }
+  if (feeDataRaw?.feeInBips != null) return asBigint(feeDataRaw.feeInBips);
+
+  // Sometimes: [feeInBips, internalContext]
+  if (Array.isArray(feeDataRaw) && feeDataRaw.length > 0) return asBigint(feeDataRaw[0]);
+
+  // Sometimes nested: { data: { feeInBips } } or { 0: { feeInBips } }
+  if (feeDataRaw?.data?.feeInBips != null) return asBigint(feeDataRaw.data.feeInBips);
+  if (feeDataRaw?.[0]?.feeInBips != null) return asBigint(feeDataRaw[0].feeInBips);
+
+  return 0n;
+}
+
+function extractAmountOut(almQuoteRaw: any): bigint {
+  // Most common: { isCallbackOnSwap, amountOut, amountInFilled }
+  if (almQuoteRaw?.amountOut != null) return asBigint(almQuoteRaw.amountOut);
+
+  // Sometimes: [isCallbackOnSwap, amountOut, amountInFilled]
+  if (Array.isArray(almQuoteRaw) && almQuoteRaw.length >= 2) return asBigint(almQuoteRaw[1]);
+
+  // Sometimes nested
+  if (almQuoteRaw?.quote?.amountOut != null) return asBigint(almQuoteRaw.quote.amountOut);
+  if (almQuoteRaw?.[0]?.amountOut != null) return asBigint(almQuoteRaw[0].amountOut);
+
+  return 0n;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -176,17 +183,13 @@ export default function SwapCard() {
   const [slippage, setSlippage] = useState("0.5");
   const [showSettings, setShowSettings] = useState(false);
 
-  // Track latest tx for UI only (approve OR swap)
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
-
-  // Force the allowance cache to refresh after approvals
   const [approvalNonce, setApprovalNonce] = useState(0);
 
   const buyToken = sellToken === "PURR" ? "USDC" : "PURR";
   const tokenIn = TOKENS[sellToken];
   const tokenOut = TOKENS[buyToken];
 
-  // Parse amount in
   const amountInParsed = useMemo(() => {
     if (!amountIn || isNaN(Number(amountIn))) return 0n;
     try {
@@ -198,41 +201,84 @@ export default function SwapCard() {
 
   // Pool reads
   const { data: poolToken0 } = useReadContract({
-    address: SOVEREIGN_POOL_ADDRESS,
+    address: ADDRESSES.POOL,
     abi: SOVEREIGN_POOL_ABI,
     functionName: "token0",
     query: { enabled: true },
   });
 
   const { data: poolAlm } = useReadContract({
-    address: SOVEREIGN_POOL_ADDRESS,
+    address: ADDRESSES.POOL,
     abi: SOVEREIGN_POOL_ABI,
     functionName: "alm",
     query: { enabled: true },
   });
 
   const { data: poolSwapFeeModule } = useReadContract({
-    address: SOVEREIGN_POOL_ADDRESS,
+    address: ADDRESSES.POOL,
     abi: SOVEREIGN_POOL_ABI,
     functionName: "swapFeeModule",
     query: { enabled: true },
   });
 
-  // Swap direction based on actual token0
   const isZeroToOne = useMemo(() => {
-    if (!poolToken0) return sellToken === "PURR"; // fallback
-    return (
-      tokenIn.address.toLowerCase() === (poolToken0 as string).toLowerCase()
-    );
+    if (!poolToken0) return sellToken === "PURR";
+    return tokenIn.address.toLowerCase() === (poolToken0 as string).toLowerCase();
   }, [poolToken0, tokenIn.address, sellToken]);
 
-  // Fee module address
   const feeModuleAddress = useMemo(() => {
     const mod = (poolSwapFeeModule as string | undefined) || "";
-    const isZero =
-      !mod || mod === "0x0000000000000000000000000000000000000000";
+    const isZero = !mod || mod === "0x0000000000000000000000000000000000000000";
     return (isZero ? SWAP_FEE_MODULE_FALLBACK : mod) as `0x${string}`;
   }, [poolSwapFeeModule]);
+
+  // Vault address (this is what BOTH contracts use)
+const { data: vaultAddr } = useReadContract({
+  address: ADDRESSES.POOL,
+  abi: SOVEREIGN_POOL_ABI,
+  functionName: "sovereignVault",
+  query: { enabled: true },
+});
+
+// On-chain decimals (don’t trust TOKENS config)
+const { data: usdcDecOnchain } = useReadContract({
+  address: TOKENS.USDC.address,
+  abi: DECIMALS_ABI,
+  functionName: "decimals",
+  query: { enabled: true },
+});
+
+const { data: purrDecOnchain } = useReadContract({
+  address: TOKENS.PURR.address,
+  abi: DECIMALS_ABI,
+  functionName: "decimals",
+  query: { enabled: true },
+});
+
+// Vault balances (raw)
+const { data: vaultUsdcRaw } = useReadContract({
+  address: TOKENS.USDC.address,
+  abi: BALANCE_OF_ABI,
+  functionName: "balanceOf",
+  args: vaultAddr ? [vaultAddr as `0x${string}`] : undefined,
+  query: { enabled: !!vaultAddr },
+});
+
+const { data: vaultPurrRaw } = useReadContract({
+  address: TOKENS.PURR.address,
+  abi: BALANCE_OF_ABI,
+  functionName: "balanceOf",
+  args: vaultAddr ? [vaultAddr as `0x${string}`] : undefined,
+  query: { enabled: !!vaultAddr },
+});
+
+// ALM spot px (raw USDC-per-PURR scaled)
+const { data: spotPxRaw } = useReadContract({
+  address: (poolAlm as `0x${string}`) || undefined,
+  abi: ALM_SPOT_ABI,
+  functionName: "getSpotPriceUSDCperPURR",
+  query: { enabled: !!poolAlm },
+});
 
   // Balance
   const { data: balanceRaw } = useReadContract({
@@ -251,27 +297,20 @@ export default function SwapCard() {
     query: { enabled: !!address },
   });
 
-  const balance = balanceRaw
-    ? formatUnits(balanceRaw, tokenIn.decimals)
-    : undefined;
+  const balance = balanceRaw ? formatUnits(balanceRaw, tokenIn.decimals) : undefined;
 
-  // Allowance (keyed by approvalNonce so it re-queries after approve confirms)
-  const {
-    data: allowance,
-    refetch: refetchAllowance,
-    queryKey: _allowanceKey, // not used, but keeps TS happy if wagmi exposes it
-  } = useReadContract({
+  // Allowance
+  const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: tokenIn.address,
     abi: ERC20_ABI,
     functionName: "allowance",
-    args: address ? [address, SOVEREIGN_POOL_ADDRESS] : undefined,
+    args: address ? [address, ADDRESSES.POOL] : undefined,
     query: {
       enabled: !!address && amountInParsed > 0n,
-      // ensure we don't keep stale allowance around
       staleTime: 0,
       gcTime: 0,
     },
-    // @ts-expect-error wagmi v2 supports scopeKey; if yours doesn't, remove it.
+    // @ts-expect-error wagmi v2 supports scopeKey; remove if your version doesn't.
     scopeKey: `allowance-${sellToken}-${approvalNonce}`,
   });
 
@@ -281,10 +320,15 @@ export default function SwapCard() {
     return allowance < amountInParsed;
   }, [amountInParsed, allowance]);
 
-  // Fee bips
-  const { data: feeDataRaw } = useReadContract({
+  // Fee quote
+  const {
+    data: feeDataRaw,
+    error: feeError,
+    isError: feeIsError,
+    isLoading: feeLoading,
+  } = useReadContract({
     address: feeModuleAddress,
-    abi: SWAP_FEE_MODULE_ABI,
+    abi: FEE_MODULE_ABI,
     functionName: "getSwapFeeInBips",
     args:
       amountInParsed > 0n
@@ -297,33 +341,29 @@ export default function SwapCard() {
             "0x",
           ]
         : undefined,
-    query: { enabled: amountInParsed > 0n },
+    query: {
+      enabled: amountInParsed > 0n,
+      retry: false, // surface errors immediately
+    },
   });
 
-  const feeBips = useMemo(() => {
-    const v: any = feeDataRaw;
-    // viem returns the tuple object directly: { feeInBips, internalContext }
-    const fee = v?.feeInBips;
-    if (fee == null) return 0n;
-    try {
-      return BigInt(fee);
-    } catch {
-      return 0n;
-    }
-  }, [feeDataRaw]);
-
+  const feeBips = useMemo(() => extractFeeBips(feeDataRaw), [feeDataRaw]);
   const feePct = useMemo(() => Number(feeBips) / 100, [feeBips]);
 
-  // amountInMinusFee per pool
   const amountInMinus = useMemo(() => {
     if (amountInParsed <= 0n) return 0n;
     return amountInMinusFee(amountInParsed, feeBips);
   }, [amountInParsed, feeBips]);
 
   // ALM quote
-  const { data: almQuoteRaw, isLoading: quoteLoading } = useReadContract({
+  const {
+    data: almQuoteRaw,
+    isLoading: quoteLoading,
+    error: quoteError,
+    isError: quoteIsError,
+  } = useReadContract({
     address: (poolAlm as `0x${string}`) || undefined,
-    abi: SOVEREIGN_ALM_ABI_MIN,
+    abi: SOVEREIGN_ALM_ABI,
     functionName: "getLiquidityQuote",
     args:
       amountInParsed > 0n && poolAlm
@@ -342,19 +382,13 @@ export default function SwapCard() {
             "0x",
           ]
         : undefined,
-    query: { enabled: amountInParsed > 0n && !!poolAlm },
+    query: {
+      enabled: amountInParsed > 0n && !!poolAlm,
+      retry: false,
+    },
   });
 
-  const quotedOut = useMemo(() => {
-    const q: any = almQuoteRaw;
-    const out = q?.amountOut;
-    if (out == null) return 0n;
-    try {
-      return BigInt(out);
-    } catch {
-      return 0n;
-    }
-  }, [almQuoteRaw]);
+  const quotedOut = useMemo(() => extractAmountOut(almQuoteRaw), [almQuoteRaw]);
 
   // Sync amountOut UI
   useEffect(() => {
@@ -373,19 +407,70 @@ export default function SwapCard() {
   });
   const isLoading = isPending || isConfirming;
 
-  // After ANY tx confirms, if it was an approval, refresh allowance.
-  // Easiest: always refetch allowance on success.
   useEffect(() => {
     if (!isSuccess) return;
-    // bump nonce to force query key change + refetch explicitly
     setApprovalNonce((n) => n + 1);
     refetchAllowance?.();
-    // (optional) clear txHash so "Confirming..." doesn't stick across actions
     setTxHash(undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuccess]);
+  useEffect(() => {
+    if (!vaultAddr) return;
+  
+    const usdcDec = 6;
+    const purrDec = 5;
+  
+    const vu = vaultUsdcRaw ?? 0n;
+    const vp = vaultPurrRaw ?? 0n;
+  
+    const spot = spotPxRaw ?? 0n;
+  
+    // Interpreting spot as "USDC per 1 PURR" scaled by 10^USDCdec (your ALM assumption)
+    const spotAsNumber =
+      usdcDec > 0 ? Number(spot) / 10 ** usdcDec : NaN;
+  
+    // Also show implied "PURR per 1 USDC" (reciprocal)
+    const impliedPurrPerUsdc =
+      spotAsNumber && spotAsNumber > 0 ? 1 / spotAsNumber : NaN;
+  
+    console.groupCollapsed("[SWAP DEBUG]");
+    console.log("Pool:", ADDRESSES.POOL);
+    console.log("ALM:", poolAlm);
+    console.log("FeeModule:", feeModuleAddress);
+    console.log("Vault (pool.sovereignVault()):", vaultAddr);
+  
+    console.log("USDC address:", TOKENS.USDC.address, "decimals(onchain):", usdcDec, "decimals(config):", TOKENS.USDC.decimals);
+    console.log("PURR address:", TOKENS.PURR.address, "decimals(onchain):", purrDec, "decimals(config):", TOKENS.PURR.decimals);
+  
+    console.log("Vault USDC raw:", vu.toString(), "formatted:", usdcDec ? formatUnits(vu, usdcDec) : "(no dec)");
+    console.log("Vault PURR raw:", vp.toString(), "formatted:", purrDec ? formatUnits(vp, purrDec) : "(no dec)");
+  
+    console.log("Spot px raw (PURR per USDC scaled):", spot.toString());
+    console.log("Spot px interpreted (PURR/USDC):", spotAsNumber);
+    console.log("Implied PURR/USDC:", spotAsNumber);
+  
+    // For your specific test: 0.001 USDC -> expected ~0.0047 PURR if 1 USDC = 4.7 PURR
+    if (amountInParsed > 0n && usdcDec > 0 && purrDec > 0 && spot > 0n) {
+      // expected out using your ALM formula:
+      // out = amountInRaw * 10^purrDec / spotPxRaw
+      const expectedOutRaw = (amountInParsed * BigInt(10 ** purrDec)) / spot;
+      console.log("amountInParsed:", amountInParsed.toString(), "(", formatUnits(amountInParsed, usdcDec), "USDC )");
+      console.log("expectedOutRaw (using spotPxRaw):", expectedOutRaw.toString(), "formatted:", formatUnits(expectedOutRaw, purrDec));
+    }
+  
+    console.groupEnd();
+  }, [
+    vaultAddr,
+    poolAlm,
+    feeModuleAddress,
+    usdcDecOnchain,
+    purrDecOnchain,
+    vaultUsdcRaw,
+    vaultPurrRaw,
+    spotPxRaw,
+    amountInParsed,
+  ]);
 
-  // Actions
   const handleFlip = () => {
     setSellToken(buyToken);
     setAmountIn(amountOut);
@@ -396,7 +481,6 @@ export default function SwapCard() {
     if (balance) setAmountIn(balance);
   };
 
-  // Approve MAX so you don't get stuck approving repeatedly
   const handleApprove = async () => {
     if (!address) return;
     try {
@@ -404,7 +488,7 @@ export default function SwapCard() {
         address: tokenIn.address,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [SOVEREIGN_POOL_ADDRESS, maxUint256],
+        args: [ADDRESSES.POOL, maxUint256],
       });
       setTxHash(hash);
     } catch (err) {
@@ -419,9 +503,7 @@ export default function SwapCard() {
     const slippageBps = Math.floor(Number(slippage) * 100);
 
     const minOut =
-      quotedOut > 0n
-        ? (quotedOut * BigInt(10_000 - slippageBps)) / 10_000n
-        : 0n;
+      quotedOut > 0n ? (quotedOut * BigInt(10_000 - slippageBps)) / 10_000n : 0n;
 
     const params = {
       isSwapCallback: false,
@@ -441,7 +523,7 @@ export default function SwapCard() {
 
     try {
       const hash = await writeContractAsync({
-        address: SOVEREIGN_POOL_ADDRESS,
+        address: ADDRESSES.POOL,
         abi: SOVEREIGN_POOL_ABI,
         functionName: "swap",
         args: [params],
@@ -455,19 +537,25 @@ export default function SwapCard() {
   // Button state
   const buttonState = (() => {
     if (!isConnected) return { text: "Connect Wallet", disabled: true };
-    if (!amountIn || Number(amountIn) === 0)
-      return { text: "Enter amount", disabled: true };
+    if (!amountIn || Number(amountIn) === 0) return { text: "Enter amount", disabled: true };
     if (balance && Number(amountIn) > Number(balance))
       return { text: "Insufficient balance", disabled: true };
     if (isLoading) return { text: "Confirming...", disabled: true };
+
     if (needsApproval)
-      return {
-        text: `Approve ${tokenIn.symbol}`,
-        disabled: false,
-        action: handleApprove,
-      };
-    if (amountInParsed > 0n && quoteLoading) return { text: "Quoting...", disabled: true };
+      return { text: `Approve ${tokenIn.symbol}`, disabled: false, action: handleApprove };
+
+    // If fee module reverted, show it (this usually means vault liquidity require() failed)
+    if (feeIsError) return { text: "Fee module reverted", disabled: true };
+
+    if (amountInParsed > 0n && (feeLoading || quoteLoading))
+      return { text: "Quoting...", disabled: true };
+
+    // If quote reverted, show it (ALM require/price issue)
+    if (quoteIsError) return { text: "Quote reverted", disabled: true };
+
     if (quotedOut === 0n) return { text: "No quote", disabled: true };
+
     return { text: "Swap", disabled: false, action: handleSwap };
   })();
 
@@ -483,9 +571,7 @@ export default function SwapCard() {
       <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] shadow-lg glow-green p-4 sm:p-6 flex flex-col">
         {/* header */}
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--foreground)]">
-            Swap
-          </h2>
+          <h2 className="text-lg font-semibold text-[var(--foreground)]">Swap</h2>
 
           <button
             type="button"
@@ -500,9 +586,7 @@ export default function SwapCard() {
         {/* settings */}
         {showSettings && (
           <div className="mt-4 rounded-2xl bg-[var(--accent-muted)] border border-[var(--border)] p-4">
-            <div className="text-sm text-[var(--text-muted)] mb-3">
-              Slippage Tolerance
-            </div>
+            <div className="text-sm text-[var(--text-muted)] mb-3">Slippage Tolerance</div>
 
             <div className="flex flex-wrap gap-2">
               {["0.1", "0.5", "1.0"].map((val) => (
@@ -523,9 +607,7 @@ export default function SwapCard() {
               <input
                 type="text"
                 value={slippage}
-                onChange={(e) =>
-                  setSlippage(e.target.value.replace(/[^0-9.]/g, ""))
-                }
+                onChange={(e) => setSlippage(e.target.value.replace(/[^0-9.]/g, ""))}
                 className="w-20 px-2 py-1.5 rounded-xl text-sm border border-[var(--border)] text-center bg-[var(--input-bg)] text-[var(--foreground)] outline-none"
                 placeholder="Custom"
                 inputMode="decimal"
@@ -546,7 +628,6 @@ export default function SwapCard() {
               onMaxClick={handleMax}
             />
 
-            {/* flip button */}
             <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
               <button
                 type="button"
@@ -576,9 +657,7 @@ export default function SwapCard() {
               <span>Fee (dynamic)</span>
               <span className="text-[var(--foreground)]">
                 {feePct.toFixed(2)}%{" "}
-                <span className="text-[var(--text-muted)]">
-                  ({feeBips.toString()} bips)
-                </span>
+                <span className="text-[var(--text-muted)]">({feeBips.toString()} bips)</span>
               </span>
             </div>
 
@@ -586,6 +665,28 @@ export default function SwapCard() {
               <span>Slippage</span>
               <span className="text-[var(--foreground)]">{slippage}%</span>
             </div>
+          </div>
+        )}
+
+        {/* show revert reasons */}
+        {(feeIsError || quoteIsError) && (
+          <div className="mt-4 rounded-2xl bg-[var(--accent-muted)] border border-[var(--border)] p-4 text-xs">
+            {feeIsError && (
+              <div className="text-[var(--text-muted)]">
+                <div className="font-semibold text-[var(--foreground)] mb-1">Fee module error</div>
+                <div className="font-mono break-all">
+                  {(feeError as any)?.shortMessage || (feeError as any)?.message || "reverted"}
+                </div>
+              </div>
+            )}
+            {quoteIsError && (
+              <div className="text-[var(--text-muted)] mt-3">
+                <div className="font-semibold text-[var(--foreground)] mb-1">ALM quote error</div>
+                <div className="font-mono break-all">
+                  {(quoteError as any)?.shortMessage || (quoteError as any)?.message || "reverted"}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -627,7 +728,7 @@ export default function SwapCard() {
         <div className="mt-4 text-xs text-[var(--text-muted)]">
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <span>
-              Pool: <span className="font-mono">{SOVEREIGN_POOL_ADDRESS}</span>
+              Pool: <span className="font-mono">{ADDRESSES.POOL}</span>
             </span>
             <span>
               FeeModule: <span className="font-mono">{feeModuleAddress}</span>
@@ -637,6 +738,12 @@ export default function SwapCard() {
             </span>
             <span>
               token0: <span className="font-mono">{(poolToken0 as string) || "-"}</span>
+            </span>
+            <span>
+              feeBips: <span className="font-mono">{feeBips.toString()}</span>
+            </span>
+            <span>
+              quotedOut: <span className="font-mono">{quotedOut.toString()}</span>
             </span>
           </div>
         </div>

@@ -4,30 +4,63 @@ pragma solidity ^0.8.19;
 import {ISovereignALM} from "./ALM/interfaces/ISovereignALM.sol";
 import {ALMLiquidityQuoteInput, ALMLiquidityQuote} from "./ALM/structs/SovereignALMStructs.sol";
 import {ISovereignPool} from "./SovereignPool.sol";
+
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 
-/// @title SovereignALM - Hyperliquid Spot Price Oracle ALM
-/// @notice ALM that uses Hyperliquid's spot price precompile for token/USDC swaps
-/// @dev Reads spot prices directly from Hyperliquid L1 using hyper-evm-lib
+/// @title SovereignALM - Hyperliquid Spot Price ALM (USDC/PURR)
+/// @notice Returns quotes using HL spot price and REVERTS if vault cannot pay amountOut.
+/// @dev Assumes PrecompileLib.normalizedSpotPx(spotIndexPURR) returns USDC-per-PURR
+///      scaled to USDC decimals (you observed 6 decimals).
 contract SovereignALM is ISovereignALM {
-    /// @notice Hyperliquid spot price precision (8 decimals)
-    uint256 private constant PRICE_DECIMALS = 8;
+    uint256 private constant BIPS = 10_000;
 
-    /// @notice USDC decimals
-    uint256 private constant USDC_DECIMALS = 6;
-
-    /// @notice The sovereign pool this ALM serves
     ISovereignPool public immutable pool;
 
-    /// @notice Token0 address (the non-USDC token)
-    address public immutable token0;
+    /// @dev The two tokens we support
+    address public immutable usdc;
+    address public immutable purr;
+
+    /// @dev HL spot index for PURR/USDC
+    uint64 public immutable spotIndexPURR;
+
+    /// @dev If HL orientation is inverted for your market, set true.
+    bool public immutable invertPurrPx;
+
+    /// @dev Extra buffer for vault payout check (bps). Example: 50 = 0.50%.
+    uint256 public immutable liquidityBufferBps;
 
     error SovereignALM__OnlyPool();
     error SovereignALM__ZeroPrice();
+    error SovereignALM__UnsupportedPair(address tokenIn, address tokenOut);
+    error SovereignALM__InsufficientVaultLiquidity(
+        address vault,
+        address tokenOut,
+        uint256 balOut,
+        uint256 neededOut
+    );
 
-    constructor(address _pool) {
+    constructor(
+        address _pool,
+        address _usdc,
+        address _purr,
+        uint64 _spotIndexPURR,
+        bool _invertPurrPx,
+        uint256 _liquidityBufferBps
+    ) {
+        require(_pool != address(0), "POOL_0");
+        require(_usdc != address(0) && _purr != address(0), "TOKEN_0");
+        require(_usdc != _purr, "SAME_TOKEN");
+        require(_liquidityBufferBps <= 5_000, "BUF_TOO_HIGH");
+
         pool = ISovereignPool(_pool);
-        token0 = pool.token0();
+        usdc = _usdc;
+        purr = _purr;
+
+        spotIndexPURR = _spotIndexPURR;
+        invertPurrPx = _invertPurrPx;
+        liquidityBufferBps = _liquidityBufferBps;
     }
 
     modifier onlyPool() {
@@ -35,79 +68,102 @@ contract SovereignALM is ISovereignALM {
         _;
     }
 
-    /// @notice Get the current spot price from Hyperliquid for token0/USDC
-    /// @return spotPrice The spot price with 8 decimal precision
-    function getSpotPrice() public view returns (uint64 spotPrice) {
-        // Uses PrecompileLib to read spot price directly by token address
-        spotPrice = PrecompileLib.spotPx(token0);
+    /// @notice Returns USDC-per-PURR price scaled to USDC decimals (typically 6).
+    function getSpotPriceUSDCperPURR() public view returns (uint256 pxUSDCperPURR) {
+        uint256 raw = PrecompileLib.normalizedSpotPx(spotIndexPURR);
+        if (raw == 0) revert SovereignALM__ZeroPrice();
+
+        // Based on observed data: raw ~= 4.67e8 when 1 USDC ~= 4.67 PURR
+        // => raw is PURR per USDC scaled by 1e8
+        uint256 RAW_SCALE = 1e8;
+
+        uint8 usdcDec = IERC20Metadata(usdc).decimals(); // should be 6
+        uint256 USDC_SCALE = 10 ** uint256(usdcDec);
+
+        // Convert to USDC per PURR scaled to USDC decimals:
+        // px = USDC_SCALE / (raw / RAW_SCALE) = USDC_SCALE * RAW_SCALE / raw
+        pxUSDCperPURR = Math.mulDiv(USDC_SCALE * RAW_SCALE, 1, raw);
     }
 
-    /// @notice Get token0 info from Hyperliquid
-    /// @return info Token information including decimals
-    function getToken0Info() public view returns (PrecompileLib.TokenInfo memory info) {
-        info = PrecompileLib.tokenInfo(token0);
-    }
-
-    /// @notice Calculate the output amount for a swap using Hyperliquid spot price
+    /// @notice Quote function used by the pool during swaps
     function getLiquidityQuote(
-        ALMLiquidityQuoteInput memory _almLiquidityQuoteInput,
+        ALMLiquidityQuoteInput memory input,
         bytes calldata,
         bytes calldata
-    ) external view override returns (ALMLiquidityQuote memory) {
-        // Get token0 info from precompile
-        PrecompileLib.TokenInfo memory tokenInfo = getToken0Info();
+    ) external view override returns (ALMLiquidityQuote memory quote) {
+        // Determine tokenIn/tokenOut from pool ordering and isZeroToOne
+        address t0 = pool.token0();
+        address t1 = pool.token1();
 
-        // Get normalized spot price (accounts for szDecimals)
-        // Raw spotPx needs to be multiplied by 10^szDecimals to get actual price
-        uint64 rawSpotPrice = getSpotPrice();
-        if (rawSpotPrice == 0) revert SovereignALM__ZeroPrice();
+        address tokenIn = input.isZeroToOne ? t0 : t1;
+        address tokenOut = input.isZeroToOne ? t1 : t0;
 
-        // Normalize price: multiply by 10^szDecimals to get price with 8 decimal precision
-        uint256 normalizedPrice = uint256(rawSpotPrice) * (10 ** tokenInfo.szDecimals);
+        // Only support USDC <-> PURR
+        bool ok =
+            (tokenIn == usdc && tokenOut == purr) ||
+            (tokenIn == purr && tokenOut == usdc);
 
-        uint256 amountOut = _calculateSwapOut(
-            _almLiquidityQuoteInput.amountInMinusFee,
-            normalizedPrice,
-            tokenInfo.weiDecimals,
-            _almLiquidityQuoteInput.isZeroToOne
+        if (!ok) revert SovereignALM__UnsupportedPair(tokenIn, tokenOut);
+
+        uint256 pxUSDCperPURR = getSpotPriceUSDCperPURR();
+
+        uint256 amountOut = _quoteOutAtSpot(
+            tokenIn,
+            tokenOut,
+            input.amountInMinusFee,
+            pxUSDCperPURR
         );
 
-        return ALMLiquidityQuote({
-            isCallbackOnSwap: false,
-            amountOut: amountOut,
-            amountInFilled: _almLiquidityQuoteInput.amountInMinusFee
-        });
+        // HARD liquidity check against vault live balance
+        address vault = pool.sovereignVault();
+        uint256 balOut = IERC20Metadata(tokenOut).balanceOf(vault);
+
+        // needed = amountOut * (1 + buffer)
+        uint256 needed = Math.mulDiv(amountOut, (BIPS + liquidityBufferBps), BIPS);
+
+        if (balOut < needed) {
+            revert SovereignALM__InsufficientVaultLiquidity(vault, tokenOut, balOut, needed);
+        }
+
+        // Return quote
+        quote.isCallbackOnSwap = false;
+        quote.amountOut = amountOut;
+        quote.amountInFilled = input.amountInMinusFee;
     }
 
-    /// @notice Callback after liquidity deposit
     function onDepositLiquidityCallback(uint256, uint256, bytes memory) external override onlyPool {}
-
-    /// @notice Callback after swap execution
     function onSwapCallback(bool, uint256, uint256) external override onlyPool {}
 
-    /// @notice Calculate output amount based on normalized spot price and swap direction
-    /// @dev normalizedPrice is the price of token0 in USDC with 8 decimal precision
-    /// @param amountIn Input amount in respective token decimals
-    /// @param normalizedPrice Normalized spot price (raw price * 10^szDecimals)
-    /// @param token0Decimals weiDecimals of token0
-    /// @param isZeroToOne True if swapping token0 -> USDC
-    function _calculateSwapOut(
-        uint256 amountIn,
-        uint256 normalizedPrice,
-        uint8 token0Decimals,
-        bool isZeroToOne
-    ) internal pure returns (uint256 amountOut) {
-        // Scaling factor: 10^(token0Decimals + priceDecimals - usdcDecimals)
-        uint256 scaleFactor = 10 ** (token0Decimals + PRICE_DECIMALS - USDC_DECIMALS);
+    /// @dev Spot quoting assuming px = (USDC per 1 PURR) scaled to USDC decimals.
+    ///      Works with arbitrary token decimals by using raw math.
+    function _quoteOutAtSpot(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountInRaw,
+        uint256 pxUSDCperPURR
+    ) internal view returns (uint256 amountOutRaw) {
+        uint8 usdcDec = 6;   // typically 6
+        uint8 purrDec = 5;   // often 18
 
-        if (isZeroToOne) {
-            // Token0 -> USDC
-            // amountOut (6 decimals) = amountIn (token0 decimals) * price (8 decimals) / scaleFactor
-            amountOut = (amountIn * normalizedPrice) / scaleFactor;
-        } else {
-            // USDC -> Token0
-            // amountOut (token0 decimals) = amountIn (6 decimals) * scaleFactor / price (8 decimals)
-            amountOut = (amountIn * scaleFactor) / normalizedPrice;
+        uint256 pScale = 10 ** uint256(usdcDec); // price scale
+
+        if (tokenIn == purr && tokenOut == usdc) {
+            // PURR -> USDC
+            // amountOutUSDC_raw = amountInPURR_raw * px(USDC_raw per 1 PURR) / 10^purrDec
+            // pxUSDCperPURR is scaled to USDC decimals, so it already represents "USDC raw" per 1 PURR.
+            amountOutRaw = Math.mulDiv(amountInRaw, pxUSDCperPURR, 10 ** uint256(purrDec));
+            return amountOutRaw;
         }
+
+        if (tokenIn == usdc && tokenOut == purr) {
+            // USDC -> PURR
+            // amountOutPURR_raw = amountInUSDC_raw * 10^purrDec / pxUSDCperPURR
+            // amountInUSDC_raw is already in USDC raw units.
+            amountOutRaw = Math.mulDiv(amountInRaw, 10 ** uint256(purrDec), pxUSDCperPURR);
+            return amountOutRaw;
+        }
+
+        // should be unreachable due to earlier require
+        revert SovereignALM__UnsupportedPair(tokenIn, tokenOut);
     }
 }

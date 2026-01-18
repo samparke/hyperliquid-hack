@@ -43,11 +43,6 @@ contract DeployAll is Script {
         uint256 baseFeeBips;
         uint256 minFeeBips;
         uint256 maxFeeBips;
-        uint256 deadzoneImbalanceBips;
-
-        // V2 units: "fee bips per 1 share-bps of imbalance move"
-        uint256 penaltySlopeBipsPerShareBps;
-        uint256 discountSlopeBipsPerShareBps;
 
         // liquidity sanity buffer (bps). e.g. 50 = 0.50%
         uint256 liquidityBufferBps;
@@ -85,10 +80,17 @@ contract DeployAll is Script {
         console2.log("Vault authorized pool");
 
         // 3) Deploy ALM
-        SovereignALM alm = new SovereignALM(address(pool));
+        SovereignALM alm = new SovereignALM(
+            address(pool),
+            p.usdc,
+            p.purr,
+            p.spotIndexPURR,
+            p.invertPurrPx,
+            p.liquidityBufferBps
+        );
         console2.log("Deployed SovereignALM:", address(alm));
 
-        // 4) Deploy fee module (12 args)
+        // 4) Deploy fee module (V3 = 9 args)
         BalanceSeekingSwapFeeModuleV3 feeModule = _deployFeeModule(p, pool);
         console2.log("Deployed SwapFeeModuleV3:", address(feeModule));
 
@@ -112,7 +114,7 @@ contract DeployAll is Script {
         p.pk = vm.envUint("PRIVATE_KEY");
         p.deployer = vm.addr(p.pk);
 
-        // HL agent wallet private key (the one your python server will use)
+        // HL agent wallet private key
         p.hlAgentPk = vm.envUint("HL_AGENT_PRIVATE_KEY");
         p.hlAgentAddr = vm.addr(p.hlAgentPk);
         p.hlAgentName = vm.envOr("HL_AGENT_NAME", string("hedge-bot"));
@@ -136,13 +138,7 @@ contract DeployAll is Script {
         p.baseFeeBips = vm.envUint("BASE_FEE_BIPS");
         p.minFeeBips = vm.envUint("MIN_FEE_BIPS");
         p.maxFeeBips = vm.envUint("MAX_FEE_BIPS");
-        p.deadzoneImbalanceBips = vm.envUint("DEADZONE_IMBALANCE_BIPS");
 
-        // slopes (share-bps based)
-        p.penaltySlopeBipsPerShareBps = vm.envUint("PENALTY_SLOPE_BIPS_PER_SHARE_BPS");
-        p.discountSlopeBipsPerShareBps = vm.envUint("DISCOUNT_SLOPE_BIPS_PER_SHARE_BPS");
-
-        // liquidity buffer
         p.liquidityBufferBps = vm.envUint("LIQUIDITY_BUFFER_BPS");
 
         // sanity
@@ -183,10 +179,8 @@ contract DeployAll is Script {
         internal
         returns (BalanceSeekingSwapFeeModuleV3 feeModule)
     {
-        // 12 args EXACTLY:
-        // (pool, usdc, purr, spotIndexPURR, invertPurrPx,
-        //  baseFeeBips, minFeeBips, maxFeeBips, deadzoneImbalanceBips,
-        //  penaltySlopeBipsPerShareBps, discountSlopeBipsPerShareBps, liquidityBufferBps)
+        // V3 constructor = 9 args:
+        // (pool, usdc, purr, spotIndexPURR, invertPurrPx, baseFeeBips, minFeeBips, maxFeeBips, liquidityBufferBps)
         feeModule = new BalanceSeekingSwapFeeModuleV3(
             address(pool),
             p.usdc,
@@ -196,9 +190,6 @@ contract DeployAll is Script {
             p.baseFeeBips,
             p.minFeeBips,
             p.maxFeeBips,
-            p.deadzoneImbalanceBips,
-            p.penaltySlopeBipsPerShareBps,
-            p.discountSlopeBipsPerShareBps,
             p.liquidityBufferBps
         );
     }

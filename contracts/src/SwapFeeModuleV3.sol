@@ -16,53 +16,39 @@ interface ISovereignPoolLite {
 }
 
 /**
- * @title BalanceSeekingSwapFeeModuleV3
+ * BalanceSeekingSwapFeeModuleV3 (decimals-correct, vault-based)
  *
- * Fee rule (your spec):
- *  - Let spot = normalizedSpotPx(spotIndexPURR) (assumed 1e18-scaled USDC per 1 PURR)
- *  - Let USDC and PURR be live balances in the sovereignVault (NOT pool.getReserves()).
- *  - Compute ratio: R = (USDC_value * spot) / PURR_value
- *      where USDC_value and PURR_value are normalized to 1e18 token units
- *  - Target is R == 1e18.
- *  - For every 0.1% deviation (10 bps) => add 0.1% fee (10 bps).
- *    => feeAddBps = floor(devBps / 10) * 10
- *
- * Liquidity safety:
- *  - Estimate output at spot and REQUIRE vault has enough tokenOut (with optional buffer).
- *  - This prevents "quote says you'll receive X but vault can't pay X" at least under spot.
- *
- * NOTE:
- *  - This module can revert (by design) on insufficient vault liquidity or missing balances.
- *  - If your vault payout function does NOT revert on insufficient balance, fix that too
- *    (see notes after the contract).
+ * - Spot price S = USDC per 1 PURR, scaled by 10^SPOT_DECIMALS (you said 6).
+ * - Uses LIVE vault balances for USDC/PURR.
+ * - Liquidity check: estimates output at spot and REVERTS if vault can't pay tokenOut (+buffer).
+ * - Fee rule:
+ *      Balanced when USDC_value == PURR_value * spot
+ *      In raw units: U * 10^dp * 10^ds  ~=  P * S * 10^du
+ *      deviationBps = |left-right| / right * 10_000
+ *      feeAddBps = floor(deviationBps / 10) * 10  (each 0.1% adds 0.1%)
+ *      fee = baseFeeBips + feeAddBps, clamped to [min,max]
  */
 contract BalanceSeekingSwapFeeModuleV3 is ISwapFeeModule {
     address public immutable sovereignPool;
     address public immutable usdc;
     address public immutable purr;
 
-    // Fee bounds (bips)
     uint256 public immutable baseFeeBips;
     uint256 public immutable minFeeBips;
     uint256 public immutable maxFeeBips;
 
-    // Extra safety buffer on liquidity check
-    // requiredOut = estOut * (1 + bufferBps)
     uint256 public immutable liquidityBufferBps;
 
-    // Hyperliquid spot index for PURR spot market
     uint64 public immutable spotIndexPURR;
-
-    // If HL price orientation is inverted for your market, set this true.
-    // If price is USDC per PURR, keep false.
     bool public immutable invertPurrPx;
 
     uint256 private constant BIPS = 10_000;
-    uint256 private constant ONE_E18 = 1e18;
+    uint8 private constant SPOT_DECIMALS = 6; // <--- your HL spot decimals
 
     error PoolPairMismatch(address token0, address token1);
     error ZeroVaultBalance(address vault, address token);
     error InsufficientVaultLiquidity(address vault, address tokenOut, uint256 balOut, uint256 neededOut);
+    error PriceZero();
 
     constructor(
         address _sovereignPool,
@@ -82,7 +68,6 @@ contract BalanceSeekingSwapFeeModuleV3 is ISwapFeeModule {
         require(_minFeeBips <= _baseFeeBips, "MIN_GT_BASE");
         require(_baseFeeBips <= _maxFeeBips, "BASE_GT_MAX");
         require(_maxFeeBips <= BIPS, "MAX_TOO_HIGH");
-
         require(_liquidityBufferBps <= 5_000, "BUF_TOO_HIGH");
 
         sovereignPool = _sovereignPool;
@@ -108,6 +93,7 @@ contract BalanceSeekingSwapFeeModuleV3 is ISwapFeeModule {
     ) external view override returns (SwapFeeModuleData memory data) {
         data.internalContext = "";
 
+        // default
         if (amountIn == 0) {
             data.feeInBips = _clampFee(baseFeeBips);
             return data;
@@ -119,11 +105,9 @@ contract BalanceSeekingSwapFeeModuleV3 is ISwapFeeModule {
         address t0 = pool.token0();
         address t1 = pool.token1();
 
-        // Must be the expected pair
         bool pairOk = (t0 == usdc && t1 == purr) || (t0 == purr && t1 == usdc);
         if (!pairOk) revert PoolPairMismatch(t0, t1);
 
-        // Swaps must be between the two tokens
         bool isValidSwap =
             (tokenIn == t0 || tokenIn == t1) &&
             (tokenOut == t0 || tokenOut == t1) &&
@@ -134,68 +118,54 @@ contract BalanceSeekingSwapFeeModuleV3 is ISwapFeeModule {
             return data;
         }
 
-        // --- Live vault balances (raw token units) ---
-        uint256 usdcBalRaw = IERC20Metadata(usdc).balanceOf(vault);
-        uint256 purrBalRaw = IERC20Metadata(purr).balanceOf(vault);
+        // --- live vault balances ---
+        uint256 U = IERC20Metadata(usdc).balanceOf(vault);
+        uint256 P = IERC20Metadata(purr).balanceOf(vault);
+        if (U == 0) revert ZeroVaultBalance(vault, usdc);
+        if (P == 0) revert ZeroVaultBalance(vault, purr);
 
-        if (usdcBalRaw == 0) revert ZeroVaultBalance(vault, usdc);
-        if (purrBalRaw == 0) revert ZeroVaultBalance(vault, purr);
+        // --- spot price S (USDC per PURR), 10^SPOT_DECIMALS ---
+        uint256 raw = PrecompileLib.normalizedSpotPx(spotIndexPURR); // PURR/USDC @ 1e8
+        uint256 S = (10**SPOT_DECIMALS) * 1e8 / raw;
 
-        // --- Spot price (assumed 1e18 USDC per 1 PURR unless inverted) ---
-        uint256 rawPx = PrecompileLib.normalizedSpotPx(spotIndexPURR);
-        require(rawPx > 0, "PX_0");
-
-        uint256 pxUSDCperPURR_1e18 = invertPurrPx ? _invert1e18(rawPx) : rawPx;
-
-        // --- Liquidity check: estimate amountOut at spot and require vault can pay ---
-        uint256 estOutRaw = _estimateOutAtSpotRaw(tokenIn, tokenOut, amountIn, pxUSDCperPURR_1e18);
+        // --- liquidity check (estimate out at spot, require vault can pay) ---
+        uint256 estOutRaw = _estimateOutAtSpotRaw(tokenIn, tokenOut, amountIn, S);
         if (estOutRaw > 0) {
             uint256 needed = Math.mulDiv(estOutRaw, (BIPS + liquidityBufferBps), BIPS);
             uint256 balOut = IERC20Metadata(tokenOut).balanceOf(vault);
             if (balOut < needed) revert InsufficientVaultLiquidity(vault, tokenOut, balOut, needed);
         }
 
-        // --- Compute imbalance fee from vault holdings only ---
-        // Normalize balances to 1e18 token units (NOT USD) for your equation
-        uint256 usdcAmt1e18 = _to1e18(usdcBalRaw, IERC20Metadata(usdc).decimals());
-        uint256 purrAmt1e18 = _to1e18(purrBalRaw, IERC20Metadata(purr).decimals());
+        // --- fee from vault imbalance ---
+        uint8 du = IERC20Metadata(usdc).decimals();
+        uint8 dp = 5;
 
-        // Your ratio: R = (USDC_amount * spot_price) / PURR_amount
-        // With both amounts and price 1e18-scaled, R is 1e18-scaled.
-        uint256 ratio1e18 = Math.mulDiv(usdcAmt1e18, pxUSDCperPURR_1e18, purrAmt1e18);
+        // Balanced: U * 10^dp * 10^ds  ~=  P * S * 10^du
+        // left/right are in the same "units", so deviation is dimensionless.
+        uint256 left  = Math.mulDiv(U, _pow10(dp) * _pow10(SPOT_DECIMALS), 1);
+        uint256 right = Math.mulDiv(P, Math.mulDiv(S, _pow10(du), 1), 1);
 
-        // devBps = |R - 1| in basis points
-        uint256 devAbs = ratio1e18 >= ONE_E18 ? (ratio1e18 - ONE_E18) : (ONE_E18 - ratio1e18);
-        uint256 devBps = Math.mulDiv(devAbs, BIPS, ONE_E18);
+        // protect (shouldn't be zero because P and S nonzero)
+        if (right == 0) {
+            data.feeInBips = _clampFee(baseFeeBips);
+            return data;
+        }
 
-        // for each 0.1% (10 bps) deviation => +0.1% fee (10 bps)
-        uint256 feeAddBps = (devBps / 10) * 10;
+        uint256 diff = left > right ? (left - right) : (right - left);
+        uint256 devBps = Math.mulDiv(diff, BIPS, right);
 
+        uint256 feeAddBps = (devBps / 10); // 0.1% steps
         uint256 fee = baseFeeBips + feeAddBps;
+
         data.feeInBips = _clampFee(fee);
         return data;
     }
 
-    // Universal callback (unused)
-    function callbackOnSwapEnd(
-        uint256,
-        int24,
-        uint256,
-        uint256,
-        SwapFeeModuleData memory
-    ) external pure override {}
+    // callbacks unused
+    function callbackOnSwapEnd(uint256, int24, uint256, uint256, SwapFeeModuleData memory) external pure override {}
+    function callbackOnSwapEnd(uint256, uint256, uint256, SwapFeeModuleData memory) external pure override {}
 
-    // Sovereign callback (unused)
-    function callbackOnSwapEnd(
-        uint256,
-        uint256,
-        uint256,
-        SwapFeeModuleData memory
-    ) external pure override {}
-
-    // ------------------------
-    // Internals
-    // ------------------------
+    // ------------------ internals ------------------
 
     function _clampFee(uint256 fee) internal view returns (uint256) {
         if (fee < minFeeBips) return minFeeBips;
@@ -203,51 +173,47 @@ contract BalanceSeekingSwapFeeModuleV3 is ISwapFeeModule {
         return fee;
     }
 
-    function _invert1e18(uint256 x) internal pure returns (uint256) {
-        // 1e18 / x scaled to 1e18 => 1e36 / x
-        return Math.mulDiv(1e36, 1, x);
+    function _pow10(uint8 n) internal pure returns (uint256) {
+        return 10 ** uint256(n);
     }
 
-    function _to1e18(uint256 amountRaw, uint8 decimals) internal pure returns (uint256) {
-        if (decimals == 18) return amountRaw;
-        if (decimals < 18) return amountRaw * (10 ** uint256(18 - decimals));
-        // decimals > 18
-        return amountRaw / (10 ** uint256(decimals - 18));
+    /// invert a price with SPOT_DECIMALS scaling:
+    /// S' = (10^ds * 10^ds) / S  -> still ds decimals
+    function _invertPx(uint256 px) internal pure returns (uint256) {
+        uint256 scale = 10 ** uint256(SPOT_DECIMALS);
+        return Math.mulDiv(scale * scale, 1, px);
     }
 
-    function _from1e18(uint256 amount1e18, uint8 decimals) internal pure returns (uint256) {
-        if (decimals == 18) return amount1e18;
-        if (decimals < 18) return amount1e18 / (10 ** uint256(18 - decimals));
-        // decimals > 18
-        return amount1e18 * (10 ** uint256(decimals - 18));
-    }
-
-    /// @dev Estimate output at spot, returned in raw tokenOut units.
-    /// Assumes px = (USDC per PURR) scaled to 1e18.
+    /// Estimate output at spot, returned in raw tokenOut units.
+    /// S is USDC per PURR, scaled by 10^SPOT_DECIMALS.
     function _estimateOutAtSpotRaw(
         address tokenIn,
         address tokenOut,
         uint256 amountInRaw,
-        uint256 pxUSDCperPURR_1e18
+        uint256 S
     ) internal view returns (uint256) {
         uint8 dIn = IERC20Metadata(tokenIn).decimals();
         uint8 dOut = IERC20Metadata(tokenOut).decimals();
 
-        // normalize amountIn to 1e18 token units
-        uint256 in1e18 = _to1e18(amountInRaw, dIn);
+        uint256 du = _pow10(IERC20Metadata(usdc).decimals());
+        uint256 dp = _pow10(5);
+        uint256 ds = _pow10(SPOT_DECIMALS);
 
+        // USDC -> PURR:
+        // outPurr = inUsdc * 10^dp * 10^ds / (S * 10^du)
         if (tokenIn == usdc && tokenOut == purr) {
-            // USDC -> PURR : purr = usdc / px
-            uint256 out1e18 = Math.mulDiv(in1e18, ONE_E18, pxUSDCperPURR_1e18);
-            return _from1e18(out1e18, dOut);
+            // amountInRaw is in 10^du units already
+            return Math.mulDiv(amountInRaw, dp * ds, S * du);
         }
 
+        // PURR -> USDC:
+        // outUsdc = inPurr * S * 10^du / (10^dp * 10^ds)
         if (tokenIn == purr && tokenOut == usdc) {
-            // PURR -> USDC : usdc = purr * px
-            uint256 out1e18 = Math.mulDiv(in1e18, pxUSDCperPURR_1e18, ONE_E18);
-            return _from1e18(out1e18, dOut);
+            // amountInRaw is in 10^dp units already
+            return Math.mulDiv(amountInRaw, S * du, dp * ds);
         }
 
+        // unknown pair
         return 0;
     }
 }

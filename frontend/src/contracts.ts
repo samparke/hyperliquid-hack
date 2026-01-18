@@ -10,9 +10,9 @@ export const HYPERLIQUID_TESTNET_CHAIN_ID = 998;
 // ═══════════════════════════════════════════════════════════════════════════
 export const ADDRESSES = {
   // Core Contracts - Hyperliquid Testnet
-  POOL: "0x8947670a7C9147BA258234aE7FdEE6191e95fd1f" as const, // TODO: Deploy pool
-  VAULT: "0xCAd5DB26C947fa0898C7AB8f978646F9abABb373" as const, // SovereignVault
-  ALM: "0x05CcABeb826e308BF860B69EAb47128c8bD219eb" as const, // TODO: Deploy ALM
+  POOL: "0x2E5bB169b596b3136C717258b40D6F83Ae5393Fd" as const, // TODO: Deploy pool
+  VAULT: "0x715EB367788e71C4c6aee4E8994aD407807fec27" as const, // SovereignVault
+  ALM: "0x773ACA23c3B9E9EB8e7BD27Da3863957B66e9526" as const, // TODO: Deploy ALM
 
   // Tokens
   USDC: "0x2B3370eE501B4a559b57D449569354196457D8Ab" as const, // Hyperliquid Testnet USDC
@@ -1073,82 +1073,72 @@ export const SOVEREIGN_VAULT_ABI = [
 
 export const FEE_MODULE_ABI = [
   {
+    type: "constructor",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "_sovereignPool", type: "address" },
+      { name: "_usdc", type: "address" },
+      { name: "_purr", type: "address" },
+      { name: "_spotIndexPURR", type: "uint64" },
+      { name: "_invertPurrPx", type: "bool" },
+      { name: "_baseFeeBips", type: "uint256" },
+      { name: "_minFeeBips", type: "uint256" },
+      { name: "_maxFeeBips", type: "uint256" },
+      { name: "_liquidityBufferBps", type: "uint256" },
+    ],
+  },
+
+  {
     name: "baseFeeBips",
     type: "function",
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
   },
+
+  // overload #1
   {
-    name: "minFeeBips",
+    name: "callbackOnSwapEnd",
     type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "pure",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "int24" },
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "feeInBips", type: "uint256" },
+          { name: "internalContext", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [],
   },
+
+  // overload #2
   {
-    name: "maxFeeBips",
+    name: "callbackOnSwapEnd",
     type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "pure",
+    inputs: [
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+      { name: "", type: "uint256" },
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "feeInBips", type: "uint256" },
+          { name: "internalContext", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [],
   },
-  {
-    name: "deadzoneImbalanceBips",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    name: "penaltySlopeBipsPerPct",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    name: "discountSlopeBipsPerPct",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    name: "invertPurrPx",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "bool" }],
-  },
-  {
-    name: "spotIndexPURR",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint64" }],
-  },
-  {
-    name: "sovereignPool",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-  },
-  {
-    name: "usdc",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-  },
-  {
-    name: "purr",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "address" }],
-  },
+
   {
     name: "getSwapFeeInBips",
     type: "function",
@@ -1171,101 +1161,135 @@ export const FEE_MODULE_ABI = [
       },
     ],
   },
-  // overload #1
-  {
-    name: "callbackOnSwapEnd",
-    type: "function",
-    stateMutability: "pure",
-    inputs: [
-      { name: "", type: "uint256" },
-      { name: "", type: "int24" },
-      { name: "", type: "uint256" },
-      { name: "", type: "uint256" },
-      {
-        name: "",
-        type: "tuple",
-        components: [
-          { name: "feeInBips", type: "uint256" },
-          { name: "internalContext", type: "bytes" },
-        ],
-      },
-    ],
-    outputs: [],
-  },
-  // overload #2
-  {
-    name: "callbackOnSwapEnd",
-    type: "function",
-    stateMutability: "pure",
-    inputs: [
-      { name: "", type: "uint256" },
-      { name: "", type: "uint256" },
-      { name: "", type: "uint256" },
-      {
-        name: "",
-        type: "tuple",
-        components: [
-          { name: "feeInBips", type: "uint256" },
-          { name: "internalContext", type: "bytes" },
-        ],
-      },
-    ],
-    outputs: [],
-  },
-] as const;
 
-// ALM ABI (SovereignALM)
-export const SOVEREIGN_ALM_ABI = [
   {
-    name: "pool",
+    name: "invertPurrPx",
     type: "function",
     stateMutability: "view",
     inputs: [],
-    outputs: [{ name: "", type: "address" }], // ISovereignPool
+    outputs: [{ name: "", type: "bool" }],
   },
   {
-    name: "token0",
+    name: "liquidityBufferBps",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "maxFeeBips",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "minFeeBips",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "purr",
     type: "function",
     stateMutability: "view",
     inputs: [],
     outputs: [{ name: "", type: "address" }],
   },
   {
-    name: "getSpotPrice",
+    name: "sovereignPool",
     type: "function",
     stateMutability: "view",
     inputs: [],
-    outputs: [{ name: "spotPrice", type: "uint64" }],
+    outputs: [{ name: "", type: "address" }],
   },
   {
-    name: "getToken0Info",
+    name: "spotIndexPURR",
     type: "function",
     stateMutability: "view",
     inputs: [],
-    outputs: [
-      {
-        name: "info",
-        type: "tuple",
-        components: [
-          { name: "name", type: "string" },
-          { name: "spots", type: "uint64[]" },
-          { name: "deployerTradingFeeShare", type: "uint64" },
-          { name: "deployer", type: "address" },
-          { name: "evmContract", type: "address" },
-          { name: "szDecimals", type: "uint8" },
-          { name: "weiDecimals", type: "uint8" },
-          { name: "evmExtraWeiDecimals", type: "int8" },
-        ],
-      },
+    outputs: [{ name: "", type: "uint64" }],
+  },
+  {
+    name: "usdc",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+
+  // errors
+  {
+    name: "InsufficientVaultLiquidity",
+    type: "error",
+    inputs: [
+      { name: "vault", type: "address" },
+      { name: "tokenOut", type: "address" },
+      { name: "balOut", type: "uint256" },
+      { name: "neededOut", type: "uint256" },
     ],
   },
+  {
+    name: "PoolPairMismatch",
+    type: "error",
+    inputs: [
+      { name: "token0", type: "address" },
+      { name: "token1", type: "address" },
+    ],
+  },
+  {
+    name: "PrecompileLib__SpotInfoPrecompileFailed",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "PrecompileLib__SpotPxPrecompileFailed",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "PrecompileLib__TokenInfoPrecompileFailed",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "PriceZero",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "ZeroVaultBalance",
+    type: "error",
+    inputs: [
+      { name: "vault", type: "address" },
+      { name: "token", type: "address" },
+    ],
+  },
+] as const;
+
+// ALM ABI (SovereignALM)
+export const SOVEREIGN_ALM_ABI = [
+  {
+    type: "constructor",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "_pool", type: "address" },
+      { name: "_usdc", type: "address" },
+      { name: "_purr", type: "address" },
+      { name: "_spotIndexPURR", type: "uint64" },
+      { name: "_invertPurrPx", type: "bool" },
+      { name: "_liquidityBufferBps", type: "uint256" },
+    ],
+  },
+
   {
     name: "getLiquidityQuote",
     type: "function",
     stateMutability: "view",
     inputs: [
       {
-        name: "_almLiquidityQuoteInput",
+        name: "input",
         type: "tuple",
         components: [
           { name: "isZeroToOne", type: "bool" },
@@ -1281,7 +1305,7 @@ export const SOVEREIGN_ALM_ABI = [
     ],
     outputs: [
       {
-        name: "",
+        name: "quote",
         type: "tuple",
         components: [
           { name: "isCallbackOnSwap", type: "bool" },
@@ -1291,6 +1315,31 @@ export const SOVEREIGN_ALM_ABI = [
       },
     ],
   },
+
+  {
+    name: "getSpotPriceUSDCperPURR",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "pxUSDCperPURR", type: "uint256" }],
+  },
+
+  {
+    name: "invertPurrPx",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+
+  {
+    name: "liquidityBufferBps",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+
   {
     name: "onDepositLiquidityCallback",
     type: "function",
@@ -1302,6 +1351,7 @@ export const SOVEREIGN_ALM_ABI = [
     ],
     outputs: [],
   },
+
   {
     name: "onSwapCallback",
     type: "function",
@@ -1312,6 +1362,83 @@ export const SOVEREIGN_ALM_ABI = [
       { name: "", type: "uint256" },
     ],
     outputs: [],
+  },
+
+  {
+    name: "pool",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+
+  {
+    name: "purr",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+
+  {
+    name: "spotIndexPURR",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint64" }],
+  },
+
+  {
+    name: "usdc",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+
+  // errors
+  {
+    name: "PrecompileLib__SpotInfoPrecompileFailed",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "PrecompileLib__SpotPxPrecompileFailed",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "PrecompileLib__TokenInfoPrecompileFailed",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "SovereignALM__InsufficientVaultLiquidity",
+    type: "error",
+    inputs: [
+      { name: "vault", type: "address" },
+      { name: "tokenOut", type: "address" },
+      { name: "balOut", type: "uint256" },
+      { name: "neededOut", type: "uint256" },
+    ],
+  },
+  {
+    name: "SovereignALM__OnlyPool",
+    type: "error",
+    inputs: [],
+  },
+  {
+    name: "SovereignALM__UnsupportedPair",
+    type: "error",
+    inputs: [
+      { name: "tokenIn", type: "address" },
+      { name: "tokenOut", type: "address" },
+    ],
+  },
+  {
+    name: "SovereignALM__ZeroPrice",
+    type: "error",
+    inputs: [],
   },
 ] as const;
 

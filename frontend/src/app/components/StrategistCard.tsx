@@ -265,7 +265,7 @@ export default function StrategistCard() {
   // Defaults (your vault)
   const [poolAddress, setPoolAddress] = useState<string>(ADDRESSES.POOL);
   const [vaultAddress, setVaultAddress] = useState<string>(
-    "0xDFaAade487B32062D7Ea5c06fA480a822b325A80",
+    "0x715EB367788e71C4c6aee4E8994aD407807fec27",
   );
   const [almAddress, setAlmAddress] = useState<string>(ADDRESSES.ALM);
 
